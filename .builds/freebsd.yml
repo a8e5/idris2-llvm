@@ -9,7 +9,7 @@ packages:
   - gmake
   - gmp
   - llvm11
-  - py37-pip
+  - py38-pip
   - racket
 
 environment:
