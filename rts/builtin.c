@@ -441,6 +441,10 @@ ObjPtr rapid_system_file_read_line(Idris_TSO *base, ObjPtr filePtrObj, ObjPtr _w
   size_t bufsize = 0;
   char *buffer = NULL;
   ssize_t length = getline(&buffer, &bufsize, f);
+
+  // reset errno, to distinguish return code "-1" caused by EOF (errno unset)
+  // from return code "-1" caused by error (errno set)
+  errno = 0;
   if (length == -1 && errno != 0) {
     base->rapid_errno = errno;
     rapid_C_crash("getline failed");
