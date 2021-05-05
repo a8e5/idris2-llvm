@@ -1,5 +1,6 @@
 module Compiler.GenLLVMIR
 
+import Data.Bits
 import Data.Buffer
 import Data.Either
 import Data.List
@@ -552,12 +553,17 @@ GMP_LIMB_BOUND = (1 `prim__shl_Integer` (GMP_LIMB_BITS))
 GMP_ESTIMATE_DIGITS_PER_LIMB : Integer
 GMP_ESTIMATE_DIGITS_PER_LIMB = 19
 
+twosComplement : Num a => Bits a => a -> a
+twosComplement x = 1 + (complement x)
+
 cgMkConstInteger : Int -> Integer -> Codegen (IRValue IRObjPtr)
 cgMkConstInteger i val =
     do
       let absVal = abs val
       let (len ** limbs) = getLimbs absVal
-      let newHeader = (header OBJECT_TYPE_ID_BIGINT) + (cast len)
+      let len32 = cast {to=Bits32} $ cast {to=Int} len
+      let lenForHeader = if (val >= 0) then len32 else (twosComplement len32)
+      let newHeader = (header OBJECT_TYPE_ID_BIGINT) + (cast lenForHeader)
       let typeSignature = "{i64, [" ++ show len ++ " x %LimbT]}"
       cName <- addConstant i $ "private unnamed_addr addrspace(1) constant " ++ typeSignature ++ " {i64 " ++ show newHeader ++ ", [" ++ show len ++ " x %LimbT] [" ++ (getLimbsIR limbs) ++ "]}, align 8"
       pure $ SSA IRObjPtr $ "bitcast (" ++ typeSignature ++ " addrspace(1)* " ++ cName ++ " to %ObjPtr)"
