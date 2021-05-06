@@ -28,7 +28,7 @@ tasks:
       idris2 --version
 
   - add-swap: |
-      sudo dd if=/dev/zero of=/usr/swap0 bs=1m count=2048
+      sudo dd if=/dev/zero of=/usr/swap0 bs=1m count=4096
       sudo chmod 0600 /usr/swap0
       echo 'md99	none	swap	sw,file=/usr/swap0,late	0	0' | sudo tee -a /etc/fstab
       sudo /sbin/swapon -aL
