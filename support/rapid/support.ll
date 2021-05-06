@@ -387,3 +387,14 @@ define external ccc i64 @idris_enter(%Idris_TSO.struct* %BaseTSO) {
   call fastcc i64 @idris_enter_stackbridge(%TSOPtr %BaseTSO, %RuntimePtr %heapStart, %RuntimePtr %heapEnd)
   ret i64 0
 }
+
+!llvm.module.flags = !{!3, !4}
+!llvm.dbg.cu = !{!99}
+
+!0 = !DIBasicType(name: "RuntimePtr", size: 8, align: 8, encoding: DW_ATE_address)
+!1 = !DIBasicType(name: "ObjPtr", size: 8, align: 8, encoding: DW_ATE_address)
+!3 = !{i32 7, !"Dwarf Version", i32 4}
+!4 = !{i32 2, !"Debug Info Version", i32 3}
+
+!99 = distinct !DICompileUnit(language: DW_LANG_C99, file: !100)
+!100 = !DIFile(directory: "/tmp", filename: "Main.idr")

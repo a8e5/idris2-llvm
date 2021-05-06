@@ -2589,11 +2589,22 @@ getInstIRWithComment i instr = do
   --appendCode (instrAsComment instr)
   getInstIR i instr
 
+appendMetadata : Int -> String -> Codegen String
+appendMetadata o value = do
+  i <- getUnique
+  let varname = "!" ++ show (i * 1000000 + o)
+  appendCode ("  " ++ varname ++ " = " ++ value)
+  pure varname
+
 getFunIR : Bool -> SortedMap Name Int -> Int -> Name -> List Reg -> List VMInst -> Codegen ()
 getFunIR debug conNames i n args body = do
     fargs <- traverse argIR args
     let visibility = if debug then "external" else "private"
-    appendCode ("\n\ndefine " ++ visibility ++ " fastcc %Return1 @" ++ safeName n ++ "(" ++ (showSep ", " $ prepareArgCallConv fargs) ++ ") gc \"statepoint-example\" {")
+    debugInfo <- if (not debug) then pure "" else do
+      funTmd <- appendMetadata i "!DISubroutineType(types: !{null, !0, !0, !0, !1})"
+      funmd <- appendMetadata i $ "distinct !DISubprogram(name: \"" ++ safeName n ++ "\", type: " ++ funTmd ++ ", unit: !99)"
+      pure $ "!dbg " ++ funmd
+    appendCode ("\n\ndefine " ++ visibility ++ " fastcc %Return1 @" ++ safeName n ++ "(" ++ (showSep ", " $ prepareArgCallConv fargs) ++ ") gc \"statepoint-example\" " ++ debugInfo ++ " {")
     appendCode "entry:"
     funcEntry
     traverse_ appendCode (map copyArg args)
