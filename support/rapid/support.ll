@@ -128,6 +128,7 @@ declare ccc %LimbT @__gmpn_sub(%LimbPtr nocapture writeonly, %LimbPtr nocapture 
 declare ccc %LimbT @__gmpn_mul(%LimbPtr nocapture writeonly, %LimbPtr nocapture readonly, i64, %LimbPtr nocapture readonly, i64) "gc-leaf-function"
 declare ccc void @__gmpn_and_n(%LimbPtr nocapture writeonly, %LimbPtr nocapture readonly, %LimbPtr nocapture readonly, i64) "gc-leaf-function"
 declare ccc void @__gmpn_ior_n(%LimbPtr nocapture writeonly, %LimbPtr nocapture readonly, %LimbPtr nocapture readonly, i64) "gc-leaf-function"
+declare ccc void @__gmpn_xor_n(%LimbPtr nocapture writeonly, %LimbPtr nocapture readonly, %LimbPtr nocapture readonly, i64) "gc-leaf-function"
 declare ccc %LimbT @__gmpn_lshift(%LimbPtr nocapture, %LimbPtr nocapture, i64, i32) "gc-leaf-function"
 declare ccc %LimbT @__gmpn_rshift(%LimbPtr nocapture, %LimbPtr nocapture, i64, i32) "gc-leaf-function"
 declare ccc void @__gmpn_tdiv_qr(%LimbPtr nocapture writeonly, %LimbPtr nocapture writeonly, %mp_size_t, %LimbPtr nocapture readonly, %mp_size_t, %LimbPtr nocapture readonly, %mp_size_t) "gc-leaf-function"

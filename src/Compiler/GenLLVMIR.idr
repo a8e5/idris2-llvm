@@ -1285,6 +1285,44 @@ orInteger i1 i2 = do
       )
     )
 
+xorInteger : IRValue IRObjPtr -> IRValue IRObjPtr -> Codegen (IRValue IRObjPtr)
+xorInteger i1 i2 = do
+  -- TODO: what to do with negative numbers?
+  s1 <- getObjectSize i1
+  s2 <- getObjectSize i2
+  zero1 <- icmp "eq" s1 (Const I32 0)
+  zero2 <- icmp "eq" s2 (Const I32 0)
+  resultIsUnchanged <- mkOr zero1 zero2
+
+  mkIf (pure resultIsUnchanged) (mkSelect zero1 i2 i1) (do
+    s1a <- mkAbs s1
+    s2a <- mkAbs s2
+    i1longer <- icmp "ugt" s1a s2a
+    -- "long" and "short" refer just to the respective limb counts
+    -- it doesn't matter which number is actually bigger
+    long <- mkSelect i1longer i1 i2
+    short <- mkSelect i1longer i2 i1
+    size1 <- mkZext {to=I64} !(mkSelect {t=I32} i1longer s1a s2a)
+    size2 <- mkZext {to=I64} !(mkSelect {t=I32} i1longer s2a s1a)
+    -- result can not be longer than longest number
+    let newLength = size1
+    newSize <- mkMul (Const I64 GMP_LIMB_SIZE) newLength
+    newObj <- dynamicAllocate newSize
+    putObjectHeader newObj !(mkHeader OBJECT_TYPE_ID_BIGINT !(mkTrunc newLength))
+
+    newPayload <- getObjectPayloadAddr {t=I8} newObj
+    longPayload <- getObjectPayloadAddr {t=I8} long
+    appendCode $ "  call void @llvm.memcpy.p1i8.p1i8.i64(" ++ toIR newPayload ++ ", " ++ toIR longPayload ++ ", " ++ toIR newSize ++ ", i1 false)"
+
+    newLimbs <- getObjectPayloadAddr {t=I64} newObj
+    shortLimbs <- getObjectPayloadAddr {t=I64} short
+    voidCall "ccc" "@__gmpn_xor_n" [toIR newLimbs, toIR newLimbs, toIR shortLimbs, toIR size2]
+
+    normaliseIntegerSize newObj !(mkTrunc newSize) (Const I1 0)
+
+    pure newObj
+    )
+
 mulInteger : IRValue IRObjPtr -> IRValue IRObjPtr -> Codegen (IRValue IRObjPtr)
 mulInteger i1 i2 = do
       s1 <- getObjectSize i1
@@ -2166,6 +2204,11 @@ getInstIR i (OP r (BOr IntegerType) [r1, r2]) = do
   i1 <- load (reg2val r1)
   i2 <- load (reg2val r2)
   obj <- orInteger i1 i2
+  store obj (reg2val r)
+getInstIR i (OP r (BXOr IntegerType) [r1, r2]) = do
+  i1 <- load (reg2val r1)
+  i2 <- load (reg2val r2)
+  obj <- xorInteger i1 i2
   store obj (reg2val r)
 
 getInstIR i (OP r (LT CharType) [r1, r2]) = do

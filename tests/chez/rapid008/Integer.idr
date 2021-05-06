@@ -104,6 +104,10 @@ main = do
   printLn (thirdbits `prim__or_Integer` altbits)
   printLn (altbits `prim__and_Integer` thirdbits)
   printLn (thirdbits `prim__and_Integer` altbits)
+  printLn (altbits `prim__xor_Integer` thirdbits)
+  printLn (thirdbits `prim__xor_Integer` altbits)
+  printLn ((altbits `prim__xor_Integer` thirdbits) `prim__xor_Integer` altbits)
+  printLn ((altbits `prim__xor_Integer` thirdbits) `prim__xor_Integer` thirdbits)
   testShiftLeft
   testShiftRight
   putStrLn "ok"
