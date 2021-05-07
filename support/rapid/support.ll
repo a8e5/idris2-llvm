@@ -205,16 +205,22 @@ declare fastcc i1 @llvm.rapid.isdirect(%ObjPtr noalias nocapture nofree) "gc-lea
 
 @error_msg_void = private unnamed_addr constant [23 x i8] c"Error: Executed 'void'\00"
 
-define private fastcc %Return1 @rapid_gc_enter(%TSOPtr %BaseArg, i64 %size.aligned) noinline gc "statepoint-example" {
+define private fastcc %Return1 @rapid_gc_enter(%RuntimePtr %HpNewPtr, %TSOPtr %BaseArg, i64 %size.aligned) noinline gc "statepoint-example" {
   %frame = call i8* @llvm.addressofreturnaddress()
 
+  %heapPtr = getelementptr inbounds %Idris_TSO.struct, %Idris_TSO.struct* %BaseArg, i32 0, i32 1
+; this is only required for GC stats ("allocated bytes total" value):
+; GC_STATS_START
+  store %RuntimePtr %HpNewPtr, %RuntimePtr* %heapPtr
+; GC_STATS_END
+
+  ; store requested allocation size in base->heap_alloc
   %heapAllocPtr = getelementptr inbounds %Idris_TSO.struct, %Idris_TSO.struct* %BaseArg, i32 0, i32 7
   store i64 %size.aligned, i64* %heapAllocPtr
 
   call ccc void @idris_rts_gc(%TSOPtr %BaseArg, i8* %frame)
 
   ; get updated heap pointer from BaseTSO
-  %heapPtr = getelementptr inbounds %Idris_TSO.struct, %Idris_TSO.struct* %BaseArg, i32 0, i32 1
   %heap = load %RuntimePtr, %RuntimePtr* %heapPtr
 
   %heapNext = getelementptr i8, %RuntimePtr %heap, i64 %size.aligned
@@ -322,7 +328,7 @@ continue:
   %packed3 = insertvalue %Return1 %packed2, %ObjPtr %newAddr, 2
   ret %Return1 %packed3
 gc_enter:
-  %gcresult = tail call fastcc %Return1 @rapid_gc_enter(%TSOPtr %BaseArg, i64 %size.aligned)
+  %gcresult = tail call fastcc %Return1 @rapid_gc_enter(%RuntimePtr %HpNewPtr, %TSOPtr %BaseArg, i64 %size.aligned)
   ret %Return1 %gcresult
 }
 
@@ -373,8 +379,16 @@ define private fastcc %Return1 @_extprim_Data.IORef.prim__writeIORef(%RuntimePtr
 }
 
 define private fastcc i64 @idris_enter_stackbridge(%TSOPtr %BaseTSO, i8* %heapStart, i8* %heapEnd) {
-  call fastcc %Return1 @_$7b__mainExpression$3a0$7d(%RuntimePtr %heapStart, %TSOPtr %BaseTSO, %RuntimePtr %heapEnd)
+  %result = call fastcc %Return1 @_$7b__mainExpression$3a0$7d(%RuntimePtr %heapStart, %TSOPtr %BaseTSO, %RuntimePtr %heapEnd)
   ;call hhvmcc %Return1 @Main$2e$7bmain$3a0$7d(%RuntimePtr %heapStart, %RuntimePtr %BaseTSO, %RuntimePtr %heapEnd, %ObjPtr undef)
+
+; this is only required for GC stats at the end of the program:
+; GC_STATS_START
+  %HeapAfterExec = extractvalue %Return1 %result, 0
+  %heapPtr = getelementptr inbounds %Idris_TSO.struct, %Idris_TSO.struct* %BaseTSO, i32 0, i32 1
+  store %RuntimePtr %HeapAfterExec, %RuntimePtr* %heapPtr
+; GC_STATS_END
+
   ret i64 0
 }
 

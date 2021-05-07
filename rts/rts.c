@@ -108,5 +108,17 @@ int main(int argc, char **argv) {
 
   task_start(tso);
 
+#ifdef RAPID_GC_STATS_ENABLED
+  rapid_gc_finalize_stats(tso);
+
+  fprintf(stderr, "GC stats:\n");
+  fprintf(stderr, "total GC count:%14llu collections\n" , tso->gc_stats.gc_count);
+  fprintf(stderr, "copied total: %15llu bytes\n"        , tso->gc_stats.copied_bytes_total);
+  fprintf(stderr, "alloc total:  %15llu bytes\n"        , tso->gc_stats.allocated_bytes_total);
+  fprintf(stderr, "collect total:%15llu bytes\n"        , tso->gc_stats.collected_bytes_total);
+  fprintf(stderr, "total pauses: %15.3lf seconds\n"      , tso->gc_stats.pause_ns_total / 1000000000.0 );
+  fprintf(stderr, "max pause:    %15.3lf seconds\n"        , tso->gc_stats.pause_ns_max / 1000000000.0 );
+#endif
+
   return 0;
 }

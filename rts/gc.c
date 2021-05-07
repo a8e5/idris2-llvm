@@ -4,8 +4,7 @@
 #include "object.h"
 #include "rts.h"
 
-#undef RAPID_GC_DEBUG_ENABLED
-/*#define RAPID_GC_DEBUG_ENABLED*/
+#include <time.h>
 
 #if !defined(__APPLE__)
   #define STACKMAP __LLVM_StackMaps
@@ -171,6 +170,12 @@ void idris_rts_gc(Idris_TSO *base, uint8_t *sp) {
   fprintf(stderr, "GC called for %llu bytes, stack pointer: %p\n", base->heap_alloc, (void *)sp);
 #endif
 
+#ifdef RAPID_GC_STATS_ENABLED
+  struct timespec start_time;
+  clock_gettime(CLOCK_MONOTONIC, &start_time);
+  uint64_t oldNurseryUsed = (uint64_t)base->nurseryNext - (uint64_t)base->nurseryStart - base->heap_alloc;
+#endif
+
   uint64_t returnAddress = *((uint64_t *) sp);
   uint8_t *fp = sp - sizeof(void *);
   sp += sizeof(void *);
@@ -289,6 +294,22 @@ void idris_rts_gc(Idris_TSO *base, uint8_t *sp) {
   fprintf(stderr, " next object: %p\n", (void *)base->nurseryNext);
 #endif
 
+#ifdef RAPID_GC_STATS_ENABLED
+  base->gc_stats.gc_count += 1;
+
+  uint64_t current_heap_used = (uint64_t)base->nurseryNext - (uint64_t)base->nurseryStart;
+  base->gc_stats.allocated_bytes_total += oldNurseryUsed - current_heap_used;
+  base->gc_stats.copied_bytes_total += current_heap_used;
+
+  struct timespec end_time;
+  clock_gettime(CLOCK_MONOTONIC, &end_time);
+  uint64_t pause_nsec = (end_time.tv_sec - start_time.tv_sec) * 1000000000 + (end_time.tv_nsec - start_time.tv_nsec);
+  base->gc_stats.pause_ns_total += pause_nsec;
+  if (pause_nsec > base->gc_stats.pause_ns_max) {
+    base->gc_stats.pause_ns_max = pause_nsec;
+  }
+#endif
+
   // There's probably a more efficient way to do this, but this should be rare
   // enough, that it shouldn't matter too much.
   if ((uint64_t)base->nurseryNext + base->heap_alloc > (uint64_t)base->nurseryEnd) {
@@ -299,6 +320,12 @@ void idris_rts_gc(Idris_TSO *base, uint8_t *sp) {
   }
   assert((uint64_t)base->nurseryNext + base->heap_alloc <= (uint64_t)base->nurseryEnd);
   base->heap_alloc = 0;
+}
+
+void
+rapid_gc_finalize_stats(Idris_TSO *base) {
+  uint64_t current_heap_used = (uint64_t)base->nurseryNext - (uint64_t)base->nurseryStart;
+  base->gc_stats.allocated_bytes_total += current_heap_used;
 }
 
 void rapid_gc_init() {
