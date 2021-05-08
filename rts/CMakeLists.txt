@@ -16,7 +16,7 @@ set(RAPID_PLATFORM_LIB "${RAPID_SUPPORT_BINARIES}/rapid/platform.a")
 set(CFLAGS)
 list(APPEND CFLAGS "-I" ".")
 list(APPEND CFLAGS "-I" "/usr/local/include")
-list(APPEND CFLAGS "-I" "../external/llvm-statepoint-utils/dist")
+list(APPEND CFLAGS "-I" "${CMAKE_CURRENT_SOURCE_DIR}/../external/llvm-statepoint-utils/dist")
 
 if (APPLE)
   list(APPEND CFLAGS "-D_DARWIN_C_SOURCE")
@@ -27,12 +27,12 @@ endif()
 foreach(C_SOURCE ${RTS_SOURCES})
   string(REGEX REPLACE "\.c$" ".bc" BC_TARGET ${C_SOURCE})
   add_custom_command(
-    OUTPUT "${CMAKE_BINARY_DIR}/${BC_TARGET}"
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${BC_TARGET}"
     COMMAND clang ARGS "-flto" "-g" "-O3" "-c" "-Wall" "-Wpedantic" "-Werror" "-Wno-format"
-    ${CFLAGS} "-std=c11" "-o" "${CMAKE_BINARY_DIR}/${BC_TARGET}" "${C_SOURCE}"
-    DEPENDS ${C_SOURCE}
+    ${CFLAGS} "-std=c11" "-o" "${CMAKE_CURRENT_BINARY_DIR}/${BC_TARGET}" "${CMAKE_CURRENT_SOURCE_DIR}/${C_SOURCE}"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${C_SOURCE}"
     )
-  set(RTS_BITCODE "${RTS_BITCODE};${CMAKE_BINARY_DIR}/${BC_TARGET}")
+  set(RTS_BITCODE "${RTS_BITCODE};${CMAKE_CURRENT_BINARY_DIR}/${BC_TARGET}")
 endforeach()
 
 add_custom_command(
@@ -42,7 +42,7 @@ add_custom_command(
   DEPENDS ${RTS_BITCODE}
   )
 
-set(RAPID_PLATFORM_SOURCE "arch_x86-64.S")
+set(RAPID_PLATFORM_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/arch_x86-64.S")
 add_custom_command(
   OUTPUT "${RAPID_PLATFORM_LIB}"
   COMMAND clang ARGS "-c" "-o" "${RAPID_PLATFORM_LIB}.o" ${RAPID_PLATFORM_SOURCE}

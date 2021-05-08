@@ -33,7 +33,7 @@ if (${RAPID_SUPPORT_BINARIES} MATCHES .)
 endif()
 
 add_custom_target(rapid_test_llvm_passes
-                  COMMAND ${LLVMLIT} test -v
+                  COMMAND ${LLVMLIT} -v "${CMAKE_CURRENT_SOURCE_DIR}/test"
                   DEPENDS rapid)
 
 if (NOT TARGET test)
