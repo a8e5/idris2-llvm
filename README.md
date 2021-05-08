@@ -1,10 +1,11 @@
-[![builds.sr.ht status](https://builds.sr.ht/~cypheon/rapid/commits.svg)](https://builds.sr.ht/~cypheon/rapid/commits?)
+[![builds.sr.ht status](https://builds.sr.ht/~cypheon/rapid/commits/.build.yml.svg?name=Debian%c2%a0%c2%a0%c2%a0%c2%a0%c2%a0)](https://builds.sr.ht/~cypheon/rapid/commits/.build.yml?)
+[![builds.sr.ht status](https://builds.sr.ht/~cypheon/rapid/commits/freebsd.yml.svg?name=FreeBSD%c2%a0%c2%a0%c2%a0)](https://builds.sr.ht/~cypheon/rapid/commits/freebsd.yml?)
 
 # LLVM codegen and native runtime for Idris 2
 
 This is a (work in progress) backend to generate native executables from Idris code,
 using the LLVM compiler infrastructure. Code is generated via [LLVM
-IR](https://llvm.org/docs/LangRef.html) (i.e. not via generated C source code).
+IR](https://llvm.org/docs/LangRef.html).
 
 The source folder `rts/` contains a primitive runtime system with a relocating
 semi-space garbage collector.
@@ -35,3 +36,19 @@ GMP needs to be installed (`libgmp-dev` on Debian).
     ./build/exec/rapidc --cg llvm -o hello samples/Hello.idr
     # run the compiled binary
     ./build/exec/hello
+
+## Limitations
+
+Differences from mainline Idris 2:
+
+ * `Int` is 63-bits only and overflow is handled differently
+
+Currently **not** implemented:
+
+ * Unicode Strings (strings containing codepoints > U+007F will be garbled,
+     lengths and offsets will be incorrect)
+ * FFI (the FFI functions from prelude and base are hardcoded & handwritten
+     specifically for the RTS)
+ * Concurrency
+ * Network primitives are stubbed and not functional
+ * Some support functions are completely missing

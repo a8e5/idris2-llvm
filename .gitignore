@@ -1,5 +1,6 @@
 *.ibc
 /build/
+/docs/build/
 /rapid
 /rts/build/
 /samples/build/
