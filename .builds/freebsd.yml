@@ -10,13 +10,16 @@ packages:
   - gmp
   - llvm11
   - py38-pip
-  - racket
 
 environment:
-  PATH: /home/build/.idris2/bin:/usr/home/build/.local/bin/:/usr/local/llvm11/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games
-  IDRIS2_CG: racket
+  PATH: /home/build/.idris2/bin:/usr/home/build/.local/bin/:/usr/local/llvm11/bin:/usr/local/sbin:/usr/sbin:/sbin:/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games
 
 tasks:
+  - install-chezscheme: |
+      # Threaded Chez Scheme Runtime
+      curl -LsSf -o /tmp/chez.txz https://sinyax.net/chez-scheme-9.5.2.txz
+      sudo /usr/sbin/pkg install -yf /tmp/chez.txz
+
   - install-lit: |
       pip install lit
       lit --version
@@ -28,7 +31,7 @@ tasks:
       idris2 --version
 
   - add-swap: |
-      sudo dd if=/dev/zero of=/usr/swap0 bs=1m count=4096
+      sudo dd if=/dev/zero of=/usr/swap0 bs=1m count=0 seek=4096
       sudo chmod 0600 /usr/swap0
       echo 'md99	none	swap	sw,file=/usr/swap0,late	0	0' | sudo tee -a /etc/fstab
       sudo /sbin/swapon -aL
