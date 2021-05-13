@@ -658,6 +658,9 @@ getObjectSize obj = do
   hdr <- getObjectHeader obj
   mkTrunc {to=I32} hdr
 
+getStringByteLength : IRValue IRObjPtr -> Codegen (IRValue I32)
+getStringByteLength = getObjectSize
+
 stringCompare : CompareOp -> Reg -> Reg -> Codegen (IRValue IRObjPtr)
 stringCompare op r1 r2 = do
   o1 <- load (reg2val r1)
@@ -724,25 +727,23 @@ stringCompare op r1 r2 = do
 
 mkSubstring : IRValue IRObjPtr -> IRValue I64 -> IRValue I64 -> Codegen (IRValue IRObjPtr)
 mkSubstring strObj startIndexRaw length = do
-  -- FIXME: this assumes ASCII
-  hdr <- getObjectHeader strObj
-  strLen <- mkBinOp "and" (ConstI64 0xffffffff) hdr
+  length32 <- mkTrunc {to=I32} !(mkMax length (Const I64 0))
+  strLenBytes <- getStringByteLength strObj
 
-  startIndex <- mkMax startIndexRaw (Const I64 0)
+  startIndex <- mkTrunc {to=I32} !(mkMax startIndexRaw (Const I64 0))
+  strPayloadStart <- getObjectPayloadAddr {t=I8} strObj
 
-  maxResultLength <- mkSub strLen startIndex
-  resultLengthRaw <- mkMin maxResultLength length
-  resultLength <- mkMax (Const I64 0) resultLengthRaw
+  startOffset <- call {t=I32} "ccc" "@utf8_codepoints_bytelen" [toIR strPayloadStart, toIR startIndex, toIR strLenBytes]
+  startAddr <- getElementPtr strPayloadStart startOffset
+  maxLengthBytes <- mkMax !(mkSub strLenBytes startOffset) (Const I32 0)
+  resultLength <- call {t=I32} "ccc" "@utf8_codepoints_bytelen" [toIR startAddr, toIR length32, toIR maxLengthBytes]
 
-  newStr <- dynamicAllocate resultLength
-  newHeader <- mkBinOp "or" resultLength (ConstI64 $ header OBJECT_TYPE_ID_STR)
+  newStr <- dynamicAllocate !(mkZext resultLength)
+  newHeader <- mkHeader OBJECT_TYPE_ID_STR resultLength
   putObjectHeader newStr newHeader
   newStrPayload <- getObjectPayloadAddr {t=I8} newStr
 
-  strPayloadStart <- getObjectPayloadAddr {t=I8} strObj
-  strCopyRangeStart <- getElementPtr strPayloadStart startIndex
-
-  voidCall "ccc" "@llvm.memcpy.p1i8.p1i8.i64" [toIR newStrPayload, toIR strCopyRangeStart, toIR resultLength, toIR (Const I1 0)]
+  voidCall "ccc" "@llvm.memcpy.p1i8.p1i8.i32" [toIR newStrPayload, toIR startAddr, toIR resultLength, toIR (Const I1 0)]
   pure newStr
 
 mkStr : Int -> String -> Codegen (IRValue IRObjPtr)
@@ -1468,9 +1469,8 @@ getInstIR i (OP r BelieveMe [_, _, v]) = do
 getInstIR i (OP r StrHead [r1]) = do
   assertObjectType r1 OBJECT_TYPE_ID_STR
   o1 <- load (reg2val r1)
-  objHeader <- getObjectHeader o1
-  let zeroStrHeader = (ConstI64 $ header OBJECT_TYPE_ID_STR)
-  strIsZero <- unlikely !(icmp "eq" zeroStrHeader objHeader)
+  strLength <- getStringByteLength o1
+  strIsZero <- unlikely !(icmp "eq" (Const I32 0) strLength)
   strHeadOk <- genLabel "strhead_ok"
   strHeadError <- genLabel "strhead_err"
   strHeadFinished <- genLabel "strhead_finished"
@@ -1479,12 +1479,9 @@ getInstIR i (OP r StrHead [r1]) = do
   beginLabel strHeadOk
   payload <- getObjectPayloadAddr {t=I8} o1
 
-  -- FIXME: this assumes ASCII
-  firstChar <- mkZext {to=I64} !(load payload)
+  firstChar <- call {t=I32} "ccc" "@utf8_decode1" [toIR payload]
 
-  newCharObj <- dynamicAllocate (ConstI64 0)
-  newHeader <- mkOr firstChar (ConstI64 $ header OBJECT_TYPE_ID_CHAR)
-  putObjectHeader newCharObj newHeader
+  newCharObj <- cgMkChar firstChar
 
   store newCharObj (reg2val r)
   jump strHeadFinished
@@ -1577,15 +1574,13 @@ getInstIR i (OP r StrCons [r1, r2]) = do
   assertObjectType r2 OBJECT_TYPE_ID_STR
   o1 <- load (reg2val r1)
   o2 <- load (reg2val r2)
-  h1 <- getObjectHeader o1
-  h2 <- getObjectHeader o2
   -- FIXME: this assumes ASCII
-  charVal64 <- mkBinOp "and" (ConstI64 0xff) h1
-  charVal <- mkTrunc {to=I8} charVal64
-  l2 <- mkBinOp "and" (ConstI64 0xffffffff) h2
-  newLength <- mkAddNoWrap (ConstI64 1) l2
-  newStr <- dynamicAllocate newLength
-  newHeader <- mkBinOp "or" newLength (ConstI64 $ header OBJECT_TYPE_ID_STR)
+  charVal32 <- unboxChar' o1
+  charVal <- mkTrunc {to=I8} charVal32
+  l32 <- getStringByteLength o2
+  newLength32 <- mkAddNoWrap (Const I32 1) l32
+  newStr <- dynamicAllocate !(mkZext newLength32)
+  putObjectHeader newStr !(mkHeader OBJECT_TYPE_ID_STR newLength32)
 
   str2 <- getObjectPayloadAddr {t=I8} o2
 
@@ -1593,9 +1588,7 @@ getInstIR i (OP r StrCons [r1, r2]) = do
   newStrPayload2 <- getElementPtr newStrPayload1 (ConstI64 1)
 
   store charVal newStrPayload1
-  appendCode $ "  call void @llvm.memcpy.p1i8.p1i8.i64(" ++ toIR newStrPayload2 ++ ", " ++ toIR str2 ++ ", " ++ toIR l2 ++ ", i1 false)"
-
-  putObjectHeader newStr newHeader
+  appendCode $ "  call void @llvm.memcpy.p1i8.p1i8.i64(" ++ toIR newStrPayload2 ++ ", " ++ toIR str2 ++ ", " ++ toIR !(mkZext {to=I64} l32) ++ ", i1 false)"
 
   store newStr (reg2val r)
 

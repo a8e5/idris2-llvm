@@ -905,6 +905,82 @@ int64_t rapid_string_bytelength(Idris_TSO *base, ObjPtr strObj) {
   return length;
 }
 
+uint32_t utf8_bytes_to_codepoints(const char *s, uint32_t n) {
+  rapid_C_crash("NOT IMPLEMENTED: utf8_bytes_to_codepoints");
+}
+
+/**
+ * Forward the given pointer `s` by `n` codepoints
+ *
+ * @param s Pointer to an UTF-8 encoded string
+ * @param n How many codepoints should be skipped
+ * @param max How many bytes may be forwarded at most
+ * @return The pointer forwarded by `n` codepoints
+ */
+const char *utf8_codepoints_to_bytes(const char *s, uint32_t n, uint32_t max) {
+  const char *end = s + max;
+  for (; n > 0 && (s < end); n--) {
+    unsigned char c = *(unsigned char *)s;
+    if (c < 0x80) {
+      // single-byte codepoint
+      s++;
+    } else {
+      c &= 0xf0;
+      if (c == 0xe0) {
+        // leading byte = 0b1110 xxxx
+        s += 3;
+      } else if (c == 0xf0) {
+        // leading byte = 0b1111 0xxx
+        s += 4;
+      } else {
+        // leading byte = 0b110x xxxx
+        s += 2;
+      }
+    }
+  }
+  if (s > end) {
+    return end;
+  }
+  return s;
+}
+
+uint32_t utf8_codepoints_bytelen(const char *s, uint32_t n, uint32_t max) {
+  return utf8_codepoints_to_bytes(s, n, max) - s;
+}
+
+/**
+ * Decode a single codepoint from the UTF-8 encoded string s
+ */
+uint32_t utf8_decode1(const char *s) {
+  unsigned char *p = (unsigned char *)s;
+  unsigned char c = p[0];
+  if (c < 0x80) {
+    return c;
+  } else {
+    c &= 0xf0;
+    if (c == 0xe0) {
+      // leading byte = 0b1110 xxxx
+      // -> 3 bytes
+      return
+        (uint32_t)(p[0] & 0x0f) << 12
+        | (uint32_t)(p[1] & 0x3f) << 6
+        | (p[2] & 0x3f);
+    } else if (c == 0xf0) {
+      // leading byte = 0b1111 0xxx
+      // -> 4 bytes
+      return
+        (uint32_t)(p[0] & 0x03) << 18
+        | (uint32_t)(p[1] & 0x3f) << 12
+        | (uint32_t)(p[2] & 0x3f) << 6
+        | (p[3] & 0x3f);
+    } else {
+      // leading byte = 0b110x xxxx
+      // -> 2 bytes
+      return (uint32_t)(p[0] & 0x1f) << 6 | (p[1] & 0x3f);
+    }
+  }
+}
+
 void rapid_builtin_init(int argc, char **argv) {
   rapid_global_argc = argc;
   rapid_global_argv = argv;
