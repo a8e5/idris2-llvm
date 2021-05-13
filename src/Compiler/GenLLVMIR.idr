@@ -743,7 +743,7 @@ mkSubstring strObj startIndexRaw length = do
   putObjectHeader newStr newHeader
   newStrPayload <- getObjectPayloadAddr {t=I8} newStr
 
-  voidCall "ccc" "@llvm.memcpy.p1i8.p1i8.i32" [toIR newStrPayload, toIR startAddr, toIR resultLength, toIR (Const I1 0)]
+  voidCall "ccc" "@llvm.memcpy.p1i8.p1i8.i64" [toIR newStrPayload, toIR startAddr, toIR !(mkZext {to=I64} resultLength), toIR (Const I1 0)]
   pure newStr
 
 mkStr : Int -> String -> Codegen (IRValue IRObjPtr)
@@ -2113,7 +2113,7 @@ getInstIR i (OP r (ShiftL IntegerType) [r1, r2]) = do
 
     newObj <- dynamicAllocate !(mkZext !(mkMul maxLimbsCount (Const I32 GMP_LIMB_SIZE)))
     lowerLimbsAddr <- getObjectPayloadAddr {t=I8} newObj
-    appendCode $ "  call void @llvm.memset.p1i8.i32(" ++ toIR lowerLimbsAddr ++ ", i8 0, " ++ toIR !(mkMul fullLimbs (Const I32 8)) ++ ", i1 false)"
+    appendCode $ "  call void @llvm.memset.p1i8.i64(" ++ toIR lowerLimbsAddr ++ ", i8 0, " ++ toIR !(mkMul !(mkZext fullLimbs) (Const I64 8)) ++ ", i1 false)"
 
     restBits <- mkURem bitCount (Const I32 GMP_LIMB_BITS)
     mkIf_ (icmp "ne" (Const I32 0) restBits) (do
@@ -2130,10 +2130,10 @@ getInstIR i (OP r (ShiftL IntegerType) [r1, r2]) = do
       ) (do
       srcLimbs <- getObjectPayloadAddr {t=I8} integerObj
       higherLimbsAddr <- getObjectSlotAddrVar {t=I8} newObj !(mkZext {to=I64} fullLimbs)
-      voidCall "ccc" "@llvm.memcpy.p1i8.p1i8.i32" [
+      voidCall "ccc" "@llvm.memcpy.p1i8.p1i8.i64" [
         toIR higherLimbsAddr,
         toIR srcLimbs,
-        toIR !(mkMul size (Const I32 GMP_LIMB_SIZE)),
+        toIR !(mkMul !(mkZext size) (Const I64 GMP_LIMB_SIZE)),
         "i1 false"
         ]
       )
@@ -2173,10 +2173,10 @@ getInstIR i (OP r (ShiftR IntegerType) [r1, r2]) = do
         ) (do
         srcHigherLimbs <- getObjectSlotAddrVar {t=I8} integerObj !(mkZext {to=I64} fullLimbs)
         dstLimbsAddr <- getObjectPayloadAddr {t=I8} newObj
-        voidCall "ccc" "@llvm.memcpy.p1i8.p1i8.i32" [
+        voidCall "ccc" "@llvm.memcpy.p1i8.p1i8.i64" [
           toIR dstLimbsAddr,
           toIR srcHigherLimbs,
-          toIR !(mkMul maxLimbsCount (Const I32 GMP_LIMB_SIZE)),
+          toIR !(mkMul !(mkZext maxLimbsCount) (Const I64 GMP_LIMB_SIZE)),
           "i1 false"
           ]
         )
