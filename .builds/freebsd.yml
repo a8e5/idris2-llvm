@@ -13,6 +13,7 @@ packages:
 
 environment:
   PATH: /home/build/.idris2/bin:/usr/home/build/.local/bin/:/usr/local/llvm11/bin:/usr/local/sbin:/usr/sbin:/sbin:/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games
+  CHEZ: /usr/local/bin/chez-scheme
 
 tasks:
   - install-chezscheme: |
