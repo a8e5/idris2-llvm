@@ -8,7 +8,7 @@ import Data.Sexp
 import Data.Sexp.Lexer
 
 Parser : Type -> Type -> Type
-Parser tok a = Grammar tok True a
+Parser tok a = Grammar () tok True a
 
 exact : Eq a => Show a => a -> Parser a ()
 exact t = terminal ("expected " ++ (show t)) f where
