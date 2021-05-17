@@ -906,7 +906,28 @@ int64_t rapid_string_bytelength(Idris_TSO *base, ObjPtr strObj) {
 }
 
 uint32_t utf8_bytes_to_codepoints(const char *s, uint32_t n) {
-  rapid_C_crash("NOT IMPLEMENTED: utf8_bytes_to_codepoints");
+  uint32_t count = 0;
+  const char *end = s + n;
+  for (; s < end; count++) {
+    unsigned char c = *(unsigned char *)s;
+    if (c < 0x80) {
+      // single-byte codepoint
+      s++;
+    } else {
+      c &= 0xf0;
+      if (c == 0xe0) {
+        // leading byte = 0b1110 xxxx
+        s += 3;
+      } else if (c == 0xf0) {
+        // leading byte = 0b1111 0xxx
+        s += 4;
+      } else {
+        // leading byte = 0b110x xxxx
+        s += 2;
+      }
+    }
+  }
+  return count;
 }
 
 /**
@@ -978,6 +999,33 @@ uint32_t utf8_decode1(const char *s) {
       // -> 2 bytes
       return (uint32_t)(p[0] & 0x1f) << 6 | (p[1] & 0x3f);
     }
+  }
+}
+
+/**
+ * Encode a single Unicode codepoint to UTF-8, write the result to `dst`,
+ * return the number of bytes written (min. 1, max. 4)
+ */
+uint32_t utf8_encode1(char *dst, uint32_t codepoint) {
+  unsigned char *p = (unsigned char *)dst;
+  if (codepoint <= 0x7f) {
+    p[0] = codepoint;
+    return 1;
+  } else if (codepoint <= 0x07ff) {
+    p[0] = 0xc0 |  (codepoint >> 6);
+    p[1] = 0x80 | ((codepoint >> 0) & 0x3f);
+    return 2;
+  } else if (codepoint <= 0xffff) {
+    p[0] = 0xe0 |  (codepoint >> 12);
+    p[1] = 0x80 | ((codepoint >>  6) & 0x3f);
+    p[2] = 0x80 | ((codepoint >>  0) & 0x3f);
+    return 3;
+  } else {
+    p[0] = 0xf0 | ((codepoint >> 18) & 0x03);
+    p[1] = 0x80 | ((codepoint >> 12) & 0x3f);
+    p[2] = 0x80 | ((codepoint >>  6) & 0x3f);
+    p[3] = 0x80 | ((codepoint >>  0) & 0x3f);
+    return 4;
   }
 }
 

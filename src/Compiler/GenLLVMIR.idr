@@ -1574,47 +1574,48 @@ getInstIR i (OP r StrCons [r1, r2]) = do
   assertObjectType r2 OBJECT_TYPE_ID_STR
   o1 <- load (reg2val r1)
   o2 <- load (reg2val r2)
-  -- FIXME: this assumes ASCII
   charVal32 <- unboxChar' o1
-  charVal <- mkTrunc {to=I8} charVal32
   l32 <- getStringByteLength o2
-  newLength32 <- mkAddNoWrap (Const I32 1) l32
-  newStr <- dynamicAllocate !(mkZext newLength32)
-  putObjectHeader newStr !(mkHeader OBJECT_TYPE_ID_STR newLength32)
+  -- maximum length of one codepoint in UTF-8 is 4 bytes
+  newLength <- mkAddNoWrap (Const I32 4) l32
+  newStr <- dynamicAllocate !(mkZext newLength)
+  putObjectHeader newStr !(mkHeader OBJECT_TYPE_ID_STR newLength)
 
   str2 <- getObjectPayloadAddr {t=I8} o2
 
   newStrPayload1 <- getObjectPayloadAddr {t=I8} newStr
-  newStrPayload2 <- getElementPtr newStrPayload1 (ConstI64 1)
 
-  store charVal newStrPayload1
+  charLength <- call {t=I32} "ccc" "@utf8_encode1" [toIR newStrPayload1, toIR charVal32]
+
+  newStrPayload2 <- getElementPtr newStrPayload1 charLength
   appendCode $ "  call void @llvm.memcpy.p1i8.p1i8.i64(" ++ toIR newStrPayload2 ++ ", " ++ toIR str2 ++ ", " ++ toIR !(mkZext {to=I64} l32) ++ ", i1 false)"
+  realNewLength <- mkAddNoWrap charLength l32
+  putObjectHeader newStr !(mkHeader OBJECT_TYPE_ID_STR realNewLength)
 
   store newStr (reg2val r)
 
 getInstIR i (OP r StrLength [r1]) = do
   assertObjectType r1 OBJECT_TYPE_ID_STR
-  h1 <- getObjectHeader !(load (reg2val r1))
-  l1 <- mkBinOp "and" (ConstI64 0xffffffff) h1
-  sizeIntObj <- cgMkInt l1
+  strObj <- load (reg2val r1)
+  strLenBytes <- getStringByteLength strObj
+
+  codepointCount <- call {t=I32} "ccc" "@utf8_bytes_to_codepoints" [toIR !(getObjectPayloadAddr {t=I8} strObj), toIR strLenBytes]
+
+  sizeIntObj <- cgMkInt !(mkZext codepointCount)
   store sizeIntObj (reg2val r)
 getInstIR i (OP r StrIndex [r1, r2]) = do
   assertObjectType r1 OBJECT_TYPE_ID_STR
   assertObjectType r2 OBJECT_TYPE_ID_INT
   o1 <- load (reg2val r1)
-  objHeader <- getObjectHeader o1
   payload0 <- getObjectPayloadAddr {t=I8} o1
+  strLenBytes <- getStringByteLength o1
 
-  index <- unboxInt (reg2val r2)
-  payload <- getElementPtr payload0 index
+  index <- mkTrunc {to=I32} !(unboxInt (reg2val r2))
+  payload <- call {t=Pointer 1 I8} "ccc" "@utf8_codepoints_to_bytes" [toIR payload0, toIR index, toIR strLenBytes]
+  -- TODO: bounds check
+  charVal <- call {t=I32} "ccc" "@utf8_decode1" [toIR payload]
 
-  -- FIXME: this assumes ASCII
-  charVal <- mkZext {to=I64} !(load payload)
-
-  newCharObj <- dynamicAllocate (ConstI64 0)
-  newHeader <- mkOr charVal (ConstI64 $ header OBJECT_TYPE_ID_CHAR)
-  putObjectHeader newCharObj newHeader
-
+  newCharObj <- cgMkChar charVal
   store newCharObj (reg2val r)
 
 getInstIR i (OP r (LT  StringType) [r1, r2]) = store !(stringCompare LT  r1 r2) (reg2val r)
@@ -1980,17 +1981,12 @@ getInstIR i (OP r (Cast IntegerType CharType) [r1]) = do
 
 getInstIR i (OP r (Cast CharType StringType) [r1]) = do
   o1 <- load (reg2val r1)
-  h1 <- getObjectHeader o1
-  -- FIXME: this assumes ASCII
-  -- FIXME: handle characters that need to be escaped
-  charVal64 <- mkBinOp "and" (ConstI64 0xff) h1
-  charVal <- mkTrunc {to=I8} charVal64
-  let newLength = (ConstI64 1)
-  newStr <- dynamicAllocate newLength
-  newHeader <- mkBinOp "or" newLength (ConstI64 $ header OBJECT_TYPE_ID_STR)
+  charVal <- unboxChar' o1
+  -- maximum length of one codepoint in UTF-8 is 4 bytes
+  newStr <- dynamicAllocate (Const I64 4)
   newStrPayload1 <- getObjectPayloadAddr {t=I8} newStr
-  store charVal newStrPayload1
-  putObjectHeader newStr newHeader
+  charLength <- call {t=I32} "ccc" "@utf8_encode1" [toIR newStrPayload1, toIR charVal]
+  putObjectHeader newStr !(mkHeader OBJECT_TYPE_ID_STR charLength)
   store newStr (reg2val r)
 
 getInstIR i (OP r (Cast IntegerType IntType) [r1]) = do
