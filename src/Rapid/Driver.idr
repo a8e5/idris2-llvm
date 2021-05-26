@@ -10,6 +10,7 @@ import Compiler.VMCode
 import Core.Directory
 import Core.CompileExpr
 import Core.Name
+import Libraries.Data.SortedMap
 import Libraries.Utils.Path
 
 import Compiler.GenLLVMIR

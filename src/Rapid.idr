@@ -8,7 +8,7 @@ import System.File
 import Compiler.VMCode
 import Core.CompileExpr
 import Core.Name
-import Libraries.Data.SortedMap
+import Libraries.Text.Bounded
 
 import Data.Sexp
 import Data.Sexp.Lexer
