@@ -101,10 +101,7 @@ int main(int argc, char **argv) {
   }
 
   tso->stack_bottom = (char *)stackmem + pagesize;
-  tso->stack_top = (char *)(tso->stack_bottom) + tso->stack_size - pagesize;
-  *(int64_t *)tso->stack_top = 0x7f7d7c7b12345678;
-  *((int64_t *)tso->stack_top - 1) = 0x7f7d7c7b12345678;
-  *((int64_t *)tso->stack_top - 2) = 0x7f7d7c7b12345678;
+  tso->stack_top = (char *)(tso->stack_bottom) + tso->stack_size;
 
   task_start(tso);
 
