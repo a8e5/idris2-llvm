@@ -433,8 +433,8 @@ funcReturn = do
   ret3 <- assignSSA $ "insertvalue %Return1 " ++ ret2 ++ ", " ++ toIR finRVal ++ ", 2"
   appendCode $ "ret %Return1 " ++ ret3
 
-dynamicAllocate : IRValue I64 -> Codegen (IRValue IRObjPtr)
-dynamicAllocate payloadSize = do
+dynamicAllocateInto : String -> IRValue I64 -> Codegen ()
+dynamicAllocateInto destVarName payloadSize = do
   totalSize <- mkAddNoWrap payloadSize HEADER_SIZE
 
   hp <- ((++) "%RuntimePtr ") <$> assignSSA "load %RuntimePtr, %RuntimePtr* %HpVar"
@@ -446,7 +446,13 @@ dynamicAllocate payloadSize = do
   appendCode $ "store %RuntimePtr " ++ newHp ++ ", %RuntimePtr* %HpVar"
   newHpLim <- assignSSA $ "extractvalue %Return1 " ++ allocated ++ ", 1"
   appendCode $ "store %RuntimePtr " ++ newHpLim ++ ", %RuntimePtr* %HpLimVar"
-  SSA IRObjPtr <$> assignSSA ("extractvalue %Return1 " ++ allocated ++ ", 2")
+  appendCode $ destVarName ++ " = extractvalue %Return1 " ++ allocated ++ ", 2"
+
+dynamicAllocate : IRValue I64 -> Codegen (IRValue IRObjPtr)
+dynamicAllocate payloadSize = do
+  varName <- mkVarName "%a"
+  dynamicAllocateInto varName payloadSize
+  pure $ SSA IRObjPtr varName
 
 mkTrunc : {to : IRType} -> IRValue from -> Codegen (IRValue to)
 mkTrunc {to} val = (SSA to) <$> assignSSA ("trunc " ++ toIR val ++ " to " ++ show to)
@@ -2924,39 +2930,52 @@ mk_prelude_fastUnpack [strObj] = do
   putObjectHeader nilObj nilHdr
   store nilObj (reg2val RVal)
 
+  returnLbl <- genLabel "ret"
   loopInitLbl <- genLabel "li"
   loopStartLbl <- genLabel "ls"
   loopBodyLbl <- genLabel "ls"
   loopEndLbl <- genLabel "le"
 
-  jump loopInitLbl
+  stringByteLength <- getStringByteLength strObj
+  isEmpty <- icmp "eq" stringByteLength (Const I32 0)
+  branch isEmpty returnLbl loopInitLbl
+
   beginLabel loopInitLbl
-  strLength <- mkSub !(getObjectSize strObj) (Const I32 1)
+  resultObj <- dynamicAllocate (Const I64 16)
+  putObjectHeader resultObj !(mkHeader (OBJECT_TYPE_ID_CON_NO_ARGS + 0x200) TAG_LIST_CONS)
+  payload0 <- getObjectPayloadAddr {t=I8} strObj
   jump loopStartLbl
+
   beginLabel loopStartLbl
-  nextIndexName <- mkVarName "%nI."
-  let nextIndex = SSA I32 nextIndexName
-  index <- phi [(strLength, loopInitLbl), (nextIndex, loopBodyLbl)]
-  finished <- icmp "slt" index (Const I32 0)
+  nextBytePos <- SSA I32 <$> mkVarName "%nI."
+  nextTail <- SSA IRObjPtr <$> mkVarName "%nT."
+  bytePos <- phi [((Const I32 0), loopInitLbl), (nextBytePos, loopBodyLbl)]
+  currentTail <- phi [(resultObj, loopInitLbl), (nextTail, loopBodyLbl)]
+
+  payload <- getElementPtr payload0 bytePos
+  charVal <- mkZext {to=I32} !(load payload)
+  ch <- cgMkChar charVal
+  putObjectSlot currentTail (Const I64 0) ch
+
+  appendCode $ (showWithoutType nextBytePos) ++ " = add " ++ toIR bytePos ++ ", 1"
+
+  finished <- icmp "uge" nextBytePos stringByteLength
   branch finished loopEndLbl loopBodyLbl
 
   beginLabel loopBodyLbl
 
-  payload0 <- getObjectPayloadAddr {t=I8} strObj
-  payload <- getElementPtr payload0 index
-  charVal <- mkZext {to=I32} !(load payload)
-  ch <- cgMkChar charVal
-  appendCode $ nextIndexName ++ " = sub " ++ toIR index ++ ", 1"
-
-  consHdr <- mkHeader (OBJECT_TYPE_ID_CON_NO_ARGS + 0x200) TAG_LIST_CONS
-  consObj <- dynamicAllocate (Const I64 16)
-  putObjectHeader consObj consHdr
-  putObjectSlot consObj (Const I64 0) ch
-  putObjectSlot consObj (Const I64 1) !(load (reg2val RVal))
-  store consObj (reg2val RVal)
+  dynamicAllocateInto (showWithoutType nextTail) (Const I64 16)
+  putObjectHeader nextTail !(mkHeader (OBJECT_TYPE_ID_CON_NO_ARGS + 0x200) TAG_LIST_CONS)
+  putObjectSlot currentTail (Const I64 1) nextTail
 
   jump loopStartLbl
+
   beginLabel loopEndLbl
+  putObjectSlot currentTail (Const I64 1) nilObj
+  store resultObj (reg2val RVal)
+  jump returnLbl
+
+  beginLabel returnLbl
 
 TAG_UNCONS_RESULT_EOF : IRValue I32
 TAG_UNCONS_RESULT_EOF = Const I32 0
