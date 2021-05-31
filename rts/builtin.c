@@ -1003,6 +1003,47 @@ uint32_t utf8_decode1(const char *s) {
 }
 
 /**
+ * Decode a single codepoint from the UTF-8 encoded string s, and returns
+ * decoded byte length.
+ *
+ * returns (codepoint | (byte_count << 32))
+ */
+uint64_t utf8_decode1_length(const char *s) {
+  unsigned char *p = (unsigned char *)s;
+  unsigned char c = p[0];
+  if (c < 0x80) {
+    return (1ull << 32) | c;
+  } else {
+    c &= 0xf0;
+    if (c == 0xe0) {
+      // leading byte = 0b1110 xxxx
+      // -> 3 bytes
+      return
+        (3ull << 32)
+        | (uint32_t)(p[0] & 0x0f) << 12
+        | (uint32_t)(p[1] & 0x3f) << 6
+        | (p[2] & 0x3f);
+    } else if (c == 0xf0) {
+      // leading byte = 0b1111 0xxx
+      // -> 4 bytes
+      return
+        (4ull << 32)
+        | (uint32_t)(p[0] & 0x03) << 18
+        | (uint32_t)(p[1] & 0x3f) << 12
+        | (uint32_t)(p[2] & 0x3f) << 6
+        | (p[3] & 0x3f);
+    } else {
+      // leading byte = 0b110x xxxx
+      // -> 2 bytes
+      return
+        (2ull << 32)
+        | (uint32_t)(p[0] & 0x1f) << 6
+        | (p[1] & 0x3f);
+    }
+  }
+}
+
+/**
  * Encode a single Unicode codepoint to UTF-8, write the result to `dst`,
  * return the number of bytes written (min. 1, max. 4)
  */

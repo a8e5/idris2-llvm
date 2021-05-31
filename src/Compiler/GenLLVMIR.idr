@@ -667,6 +667,11 @@ getObjectSize obj = do
 getStringByteLength : IRValue IRObjPtr -> Codegen (IRValue I32)
 getStringByteLength = getObjectSize
 
+getStringLength : IRValue IRObjPtr -> Codegen (IRValue I32)
+getStringLength strObj = do
+  strLenBytes <- getStringByteLength strObj
+  call {t=I32} "ccc" "@utf8_bytes_to_codepoints" [toIR !(getObjectPayloadAddr {t=I8} strObj), toIR strLenBytes]
+
 stringCompare : CompareOp -> Reg -> Reg -> Codegen (IRValue IRObjPtr)
 stringCompare op r1 r2 = do
   o1 <- load (reg2val r1)
@@ -1501,9 +1506,8 @@ getInstIR i (OP r StrHead [r1]) = do
 getInstIR i (OP r StrTail [r1]) = do
   assertObjectType r1 OBJECT_TYPE_ID_STR
   o1 <- load (reg2val r1)
-  objHeader <- getObjectHeader o1
-  strLength <- mkAnd objHeader (Const I64 0xffffffff)
-  strIsZero <- unlikely !(icmp "eq" strLength (Const I64 0))
+  strLength <- getStringLength o1
+  strIsZero <- unlikely !(icmp "eq" strLength (Const I32 0))
   strTailOk <- genLabel "strtail_ok"
   strTailError <- genLabel "strtail_err"
   strTailFinished <- genLabel "strtail_finished"
@@ -1511,7 +1515,7 @@ getInstIR i (OP r StrTail [r1]) = do
   branch strIsZero strTailError strTailOk
   beginLabel strTailOk
 
-  subStr <- mkSubstring o1 (Const I64 1) !(mkSub strLength (Const I64 1))
+  subStr <- mkSubstring o1 (Const I64 1) !(mkSub !(mkZext strLength) (Const I64 1))
 
   store subStr (reg2val r)
   jump strTailFinished
@@ -1603,9 +1607,7 @@ getInstIR i (OP r StrCons [r1, r2]) = do
 getInstIR i (OP r StrLength [r1]) = do
   assertObjectType r1 OBJECT_TYPE_ID_STR
   strObj <- load (reg2val r1)
-  strLenBytes <- getStringByteLength strObj
-
-  codepointCount <- call {t=I32} "ccc" "@utf8_bytes_to_codepoints" [toIR !(getObjectPayloadAddr {t=I8} strObj), toIR strLenBytes]
+  codepointCount <- getStringLength strObj
 
   sizeIntObj <- cgMkInt !(mkZext codepointCount)
   store sizeIntObj (reg2val r)
@@ -2839,8 +2841,7 @@ mk_prim__bufferSetString [buf, offsetObj, valObj, _] = do
   offset <- unboxInt' offsetObj
   payloadStart <- getObjectPayloadAddr {t=I8} buf
   bytePtr <- getElementPtr payloadStart offset
-  strHeader <- getObjectHeader valObj
-  strLength <- mkAnd strHeader (ConstI64 0xffffffff)
+  strLength <- mkZext {to=I64} !(getStringByteLength valObj)
   strPayload <- getObjectPayloadAddr {t=I8} valObj
   appendCode $ "  call void @llvm.memcpy.p1i8.p1i8.i64(" ++ toIR bytePtr ++ ", " ++ toIR strPayload ++ ", " ++ toIR strLength ++ ", i1 false)"
 
@@ -2953,11 +2954,13 @@ mk_prelude_fastUnpack [strObj] = do
   currentTail <- phi [(resultObj, loopInitLbl), (nextTail, loopBodyLbl)]
 
   payload <- getElementPtr payload0 bytePos
-  charVal <- mkZext {to=I32} !(load payload)
+  decodedRaw <- call {t=I64} "ccc" "@utf8_decode1_length" [toIR payload]
+  charVal <- mkTrunc {to=I32} decodedRaw
+  decodedLength <- mkTrunc {to=I32} !(mkShiftR decodedRaw (Const I64 32))
   ch <- cgMkChar charVal
   putObjectSlot currentTail (Const I64 0) ch
 
-  appendCode $ (showWithoutType nextBytePos) ++ " = add " ++ toIR bytePos ++ ", 1"
+  appendCode $ (showWithoutType nextBytePos) ++ " = add " ++ toIR bytePos ++ ", " ++ showWithoutType decodedLength
 
   finished <- icmp "uge" nextBytePos stringByteLength
   branch finished loopEndLbl loopBodyLbl
@@ -2990,7 +2993,7 @@ mk_prim__stringIteratorNew [strObj] = do
 mk_prim__stringIteratorNext : Vect 2 (IRValue IRObjPtr) -> Codegen ()
 mk_prim__stringIteratorNext [strObj, iteratorObj] = do
   offset <- unboxInt' iteratorObj
-  strLength <- mkZext !(getObjectSize strObj)
+  strLength <- mkZext !(getStringByteLength strObj)
   mkIf_ (icmp "uge" offset strLength) (do
        eofObj <- dynamicAllocate (Const I64 0)
        hdr <- mkHeader OBJECT_TYPE_ID_CON_NO_ARGS TAG_UNCONS_RESULT_EOF
@@ -3003,10 +3006,15 @@ mk_prim__stringIteratorNext [strObj, iteratorObj] = do
 
        payload0 <- getObjectPayloadAddr {t=I8} strObj
        payload <- getElementPtr payload0 offset
-       charObj <- cgMkChar !(mkZext !(load payload))
+
+       decodedRaw <- call {t=I64} "ccc" "@utf8_decode1_length" [toIR payload]
+       charVal <- mkTrunc {to=I32} decodedRaw
+       decodedLength <- mkTrunc {to=I32} !(mkShiftR decodedRaw (Const I64 32))
+
+       charObj <- cgMkChar charVal
        putObjectSlot resultObj (Const I64 0) charObj
 
-       newOffset <- mkAdd (Const I64 1) offset
+       newOffset <- mkAdd !(mkZext decodedLength) offset
        newIter <- cgMkInt newOffset
        putObjectSlot resultObj (Const I64 1) newIter
        store resultObj (reg2val RVal)

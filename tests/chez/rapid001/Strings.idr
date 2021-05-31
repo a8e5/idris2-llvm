@@ -58,6 +58,8 @@ main = do
     ]
   putStrLn "substrings:"
   putStrLn (prim__strTail alphabet)
+  putStrLn (prim__strTail "äöü")
+  printLn $ cast {to=Int} (prim__strHead "äöü")
   putStrLn (substr 0 0 alphabet)
   putStrLn (substr 0 25 alphabet)
   putStrLn (substr 0 26 alphabet)
@@ -73,7 +75,9 @@ main = do
   putStrLn $ "rev2: " ++ (prim__strReverse "x")
   putStrLn $ "rev3: " ++ (prim__strReverse alphabet)
   printLn $ fastUnpack "abc456@//$"
+  printLn $ map (cast {to=Int}) $ fastUnpack "äöü☃"
   printLn $ toList $ Iterator.unpack "abc987@//$"
+  printLn $ map (cast {to=Int}) $ toList $ Iterator.unpack "äöü☃"
   putStrLn $ strMatch $ fastPack $ unpack ""
   putStrLn $ strMatch $ fastPack $ unpack "abc"
   putStrLn $ strMatch $ fastPack $ unpack "def"

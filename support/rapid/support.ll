@@ -101,6 +101,7 @@ declare ccc i32 @rapid_clock_read(%TSOPtr, %ObjPtr, i32) "gc-leaf-function"
 declare ccc %i8p1 @utf8_codepoints_to_bytes(%i8p1 nocapture readonly, i32, i32) "gc-leaf-function"
 declare ccc i32 @utf8_codepoints_bytelen(%i8p1 nocapture readonly, i32, i32) "gc-leaf-function"
 declare ccc i32 @utf8_decode1(%i8p1 nocapture readonly) "gc-leaf-function"
+declare ccc i64 @utf8_decode1_length(%i8p1 nocapture readonly) "gc-leaf-function"
 declare ccc i32 @utf8_encode1(%i8p1 nocapture writeonly, i32) "gc-leaf-function"
 declare ccc i32 @utf8_bytes_to_codepoints(%i8p1 nocapture readonly, i32) "gc-leaf-function"
 
