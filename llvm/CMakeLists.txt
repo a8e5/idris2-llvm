@@ -10,6 +10,11 @@ message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 include_directories(${LLVM_INCLUDE_DIRS})
 add_definitions(${LLVM_DEFINITIONS})
 
+if (${LLVM_ENABLE_RTTI})
+else()
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
+endif()
+
 add_library(rapid MODULE Passes/LowerRapidIntrinsics.cpp)
 
 set_property(TARGET rapid PROPERTY CXX_STANDARD 17)
