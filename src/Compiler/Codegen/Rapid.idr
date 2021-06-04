@@ -77,7 +77,7 @@ compile defs tmpDir outputDir term outfile = do
   let foreigns = map (\(n,_,d) => (n,d)) $ filter isFgn $ namedDefs cd
   let allFunctions = vmcode cd
   let optFlags = [
-    "-mem2reg", "-constprop", "-constmerge", "-sccp", "-dce", "-globaldce",
+    "-mem2reg", "-instsimplify", "-constmerge", "-sccp", "-dce", "-globaldce",
     "-rewrite-statepoints-for-gc"]
 
   coreLift_ $ writeIR allFunctions foreigns support outputFileName debug
