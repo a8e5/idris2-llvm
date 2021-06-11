@@ -1,0 +1,10 @@
+package rapid-lite
+
+brief = "LLVM Codegen Backend without Idris Frontend"
+
+depends = idris2
+
+sourcedir = "src"
+
+main = Rapid.Lite
+executable = rapid-lite

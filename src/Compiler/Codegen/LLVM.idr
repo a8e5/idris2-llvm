@@ -1,4 +1,4 @@
-module Compiler.Codegen.Rapid
+module Compiler.Codegen.LLVM
 
 import Data.List
 import Data.String

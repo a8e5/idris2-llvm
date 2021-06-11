@@ -1,11 +1,10 @@
 all: llvm-passes rapid rts
 
 rapid:
-	idris2 --build rapid-cg.ipkg
 	idris2 --build rapidc.ipkg
 
-cg:
-	idris2 --build rapid-cg.ipkg
+rapid-lite:
+	idris2 --build rapid-lite.ipkg
 
 docs:
 	$(MAKE) -C docs html
@@ -41,4 +40,4 @@ test: rts test-llvm
 test-llvm:
 	$(MAKE) -C llvm test
 
-.PHONY: all check clean clean-docs clean-tests docs rapid rts test
+.PHONY: all check clean clean-docs clean-tests docs rapid rapid-lite rts test

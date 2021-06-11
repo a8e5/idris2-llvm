@@ -1,4 +1,4 @@
-module Rapid
+module Rapid.Lite
 
 import Data.List
 import Data.String

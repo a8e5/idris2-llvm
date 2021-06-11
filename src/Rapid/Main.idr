@@ -6,7 +6,7 @@ import Compiler.Common
 import Idris.Driver
 
 import Compiler.Codegen.VmcodeSexp
-import Compiler.Codegen.Rapid
+import Compiler.Codegen.LLVM
 
 main : IO ()
 main = do
