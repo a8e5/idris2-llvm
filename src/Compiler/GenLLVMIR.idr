@@ -12,12 +12,11 @@ import System.Info
 
 import Compiler.CompileExpr
 import Compiler.VMCode
+import Control.Codegen
 import Core.TT
 import Data.Utils
 import Libraries.Data.SortedMap
 import Libraries.Utils.Hex
-
-import Codegen
 
 OBJECT_TYPE_ID_CON_NO_ARGS : Int
 OBJECT_TYPE_ID_CON_NO_ARGS = 0xff
