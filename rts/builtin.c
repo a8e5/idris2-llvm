@@ -457,6 +457,7 @@ ObjPtr rapid_system_file_read_line(Idris_TSO *base, ObjPtr filePtrObj, ObjPtr _w
   ObjPtr newStr = rapid_C_allocate(base, HEADER_SIZE + length);
   newStr->hdr = MAKE_HEADER(OBJ_TYPE_STRING, length);
   memcpy(OBJ_PAYLOAD(newStr), buffer, length);
+  free(buffer);
 
   ObjPtr newPtr = rapid_C_allocate(base, HEADER_SIZE + POINTER_SIZE);
   newPtr->hdr = MAKE_HEADER(OBJ_TYPE_PTR, 1);
@@ -509,6 +510,7 @@ ObjPtr rapid_system_stdin_getline(Idris_TSO *base, ObjPtr _world) {
   ObjPtr newStr = rapid_C_allocate(base, HEADER_SIZE + length);
   newStr->hdr = MAKE_HEADER(OBJ_TYPE_STRING, length);
   memcpy(OBJ_PAYLOAD(newStr), buffer, length);
+  free(buffer);
 
   return newStr;
 }
