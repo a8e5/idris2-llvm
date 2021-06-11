@@ -37,8 +37,11 @@ if (${RAPID_SUPPORT_BINARIES} MATCHES .)
     )
 endif()
 
+configure_file("lit.cfg.in" "cmake.lit.cfg")
+
 add_custom_target(rapid_test_llvm_passes
-                  COMMAND ${LLVMLIT} -v "${CMAKE_CURRENT_SOURCE_DIR}/test"
+                  COMMAND ${LLVMLIT} --config-prefix cmake.lit -v "${CMAKE_CURRENT_BINARY_DIR}"
+                  WORKING_DIRECTORY .
                   DEPENDS rapid)
 
 if (NOT TARGET test)

@@ -1,0 +1,8 @@
+import lit.formats
+import os
+
+config.name = "rapid_it"
+config.suffixes = [".ll"]
+config.test_format = lit.formats.ShTest()
+config.test_source_root = "@CMAKE_CURRENT_SOURCE_DIR@/test"
+config.test_exec_root = "@CMAKE_CURRENT_BINARY_DIR@/test"

@@ -9,15 +9,32 @@ find_package(Idris2)
 set(RAPID_SUPPORT_BINARIES "${CMAKE_BINARY_DIR}/build/support")
 add_custom_target(test)
 
-add_idris_package(rapid2-cg rapid-cg.ipkg
-  src/Rapid.idr
+add_idris_package(rapid-lite rapid-lite.ipkg
+  src/Compiler/GenLLVMIR.idr
+  src/Compiler/Optimize.idr
+  src/Compiler/PrepareCode.idr
+  src/Compiler/VMCodeSexp.idr
+  src/Control/Codegen.idr
+  src/Data/Sexp.idr
+  src/Data/Sexp/Lexer.idr
+  src/Data/Sexp/Parser.idr
+  src/Data/Utils.idr
   src/Rapid/Driver.idr
+  src/Rapid/Lite.idr
   )
 
 add_idris_package(rapidc rapidc.ipkg
-  src/Rapid.idr
+  src/Compiler/Codegen/LLVM.idr
+  src/Compiler/Codegen/VmcodeSexp.idr
+  src/Compiler/GenLLVMIR.idr
+  src/Compiler/PrepareCode.idr
+  src/Compiler/VMCodeSexp.idr
+  src/Control/Codegen.idr
+  src/Data/Sexp.idr
+  src/Data/Utils.idr
   src/Rapid/Driver.idr
-  )
+  src/Rapid/Main.idr
+)
 
 add_subdirectory(llvm)
 add_subdirectory(rts)
