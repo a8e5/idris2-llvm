@@ -13,6 +13,7 @@ import Compiler.Common
 import Compiler.VMCode
 import Libraries.Utils.Path
 
+import Rapid.Common
 import Rapid.Driver
 
 isFgn : (Name, a, NamedDef) -> Bool
@@ -50,6 +51,15 @@ getDebug = any isDebug
     isDebug : String -> Bool
     isDebug directive = (trim directive) == "debug"
 
+getGCDirective : List String -> Either String GCFlavour
+getGCDirective [] = pure Statepoint
+getGCDirective ("gc=zero"::_) = pure Zero
+getGCDirective ("gc=bdw"::_) = pure BDW
+getGCDirective ("gc=statepoint"::_) = pure Statepoint
+getGCDirective (x::xs) = if isPrefixOf "gc=" x
+  then Left ("invalid GC flavour: " ++ x ++ " (supported: zero,bdw,statepoint)")
+  else getGCDirective xs
+
 compile : Ref Ctxt Defs -> (tmpDir : String) -> (outputDir : String) ->
         ClosedTerm -> (outfile : String) -> Core (Maybe String)
 compile defs tmpDir outputDir term outfile = do
@@ -65,6 +75,10 @@ compile defs tmpDir outputDir term outfile = do
   directives <- getDirectives (Other "llvm")
   let debug = getDebug directives
   coreLift_ $ fPutStrLn stderr ("debug: " ++ show debug)
+
+  (Right gc) <- pure $ getGCDirective directives
+    | Left err => (coreLift_ $ fPutStrLn stderr err) >> (pure Nothing)
+  coreLift_ $ fPutStrLn stderr ("selected GC strategy: " ++ show gc)
 
   -- load supporting files first, so we can fail early
   support <- readDataFile $ "rapid" </> "support.ll"

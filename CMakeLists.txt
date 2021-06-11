@@ -19,6 +19,7 @@ add_idris_package(rapid-lite rapid-lite.ipkg
   src/Data/Sexp/Lexer.idr
   src/Data/Sexp/Parser.idr
   src/Data/Utils.idr
+  src/Rapid/Common.idr
   src/Rapid/Driver.idr
   src/Rapid/Lite.idr
   )
@@ -32,6 +33,7 @@ add_idris_package(rapidc rapidc.ipkg
   src/Control/Codegen.idr
   src/Data/Sexp.idr
   src/Data/Utils.idr
+  src/Rapid/Common.idr
   src/Rapid/Driver.idr
   src/Rapid/Main.idr
 )
