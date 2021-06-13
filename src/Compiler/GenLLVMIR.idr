@@ -3063,18 +3063,6 @@ mk_prim__clockIsValid [clockObj, _] = do
   valid <- cgMkInt !(mkZext !(getObjectSize clockObj))
   store valid (reg2val RVal)
 
-mkSupport : {n : Nat} -> Name -> (Vect n (IRValue IRObjPtr) -> Codegen ()) -> String
-mkSupport {n} name f = runCodegen (do
-          appendCode ("define external fastcc %Return1 @" ++ safeName name ++ "(" ++ (showSep ", " $ prepareArgCallConv $ toList $ map toIR args) ++ ") gc \"statepoint-example\" {")
-          funcEntry
-          f args
-          funcReturn
-          appendCode "\n}\n"
-          )
-  where
-  args : Vect n (IRValue IRObjPtr)
-  args = map (\i => SSA IRObjPtr $ "%arg" ++ show (finToNat i)) range
-
 fromCFType : CFType -> IRType
 fromCFType CFChar = I32
 fromCFType (CFIORes CFChar) = I32
