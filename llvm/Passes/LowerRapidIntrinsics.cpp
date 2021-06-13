@@ -99,6 +99,10 @@ struct LowerRapidIntrinsics : public PassInfoMixin<LowerRapidIntrinsics> {
         }
 
         auto callee = CI->getCalledFunction();
+        if (!callee) {
+          ++it;
+          continue;
+        }
 
         if (callee == rapid_boxint) {
           //errs().write_escaped("found rapid.boxint") << '\n';
