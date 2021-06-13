@@ -17,6 +17,7 @@ import Compiler.GenLLVMIR
 import Compiler.Optimize
 import Compiler.PrepareCode
 import Compiler.VMCodeSexp
+import Rapid.Common
 import Rapid.Driver
 
 record CliOptions where
@@ -72,4 +73,6 @@ main = do
     else do
       pure allFunctions
 
-  writeIR optimizedFunctions foreigns support (filename ++ ".output.ll") debug
+  let opts = MkCompileOpts debug False Statepoint
+
+  writeIR optimizedFunctions foreigns support (filename ++ ".output.ll") opts
