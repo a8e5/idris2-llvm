@@ -90,15 +90,22 @@ compile defs tmpDir outputDir term outfile = do
   coreLift_ $ fPutStrLn stderr $ "got compiledata"
   let foreigns = map (\(n,_,d) => (n,d)) $ filter isFgn $ namedDefs cd
   let allFunctions = vmcode cd
-  let optFlags = [
-    "-mem2reg", "-instsimplify", "-constmerge", "-sccp", "-dce", "-globaldce",
-    "-rewrite-statepoints-for-gc"]
-
   coreLift_ $ writeIR allFunctions foreigns support outputFileName debug
 
-  let lateTransformFlags = ["-rapid-lower"]
+  let initPasses = [
+    "mem2reg", "instsimplify", "constmerge", "sccp", "dce", "globaldce"
+    ]
+  let optPasses = []
+  let lateTransformPasses = ["rewrite-statepoints-for-gc", "rapid-lower"]
+  let passes = concat $ intersperse "," (initPasses ++ optPasses ++ lateTransformPasses)
   coreLift $ do
-    runShell $ ["opt", outputFileName, "-load=" ++ rapidLLVMPlugin] ++ optFlags ++ lateTransformFlags ++ ["-o=" ++ bcFileName]
+    runShell $ [
+      "opt",
+      "-load-pass-plugin=" ++ rapidLLVMPlugin,
+      "--passes=" ++ passes,
+      "-o=" ++ bcFileName,
+      outputFileName
+      ]
     runShell ["llc", "--frame-pointer=all", "-tailcallopt", "-o=" ++ asmFileName, bcFileName]
     True <- globalizeStackmap asmFileName
     | False => putStrLn "error"
