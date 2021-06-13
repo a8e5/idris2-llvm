@@ -17,6 +17,12 @@ import Rapid.Common
 import Compiler.GenLLVMIR
 import Compiler.PrepareCode
 
+gcPreamble : GCFlavour -> String
+gcPreamble gc =
+  ("@rapid_gc_flavour = constant i32 " ++ (show $ encodeGCFlavourAsInt gc) ++ "\n")
+    ++ if (gc /= Statepoint) then "@_LLVM_StackMaps = constant [1 x i8] [i8 0]\n@__LLVM_StackMaps = constant [1 x i8] [i8 0]\n"
+                             else ""
+
 export
 writeIR : (functions : List (Name, VMDef)) -> (foreigns : List (Name, NamedDef)) ->
           (support : String) -> (outfile : String) -> (opts : CompileOpts) -> IO ()
@@ -29,6 +35,7 @@ writeIR functions foreigns support outfile opts = do
   (Right outFile) <- openFile outfile WriteTruncate
   | Left err => putStrLn $ "error opening output file: " ++ show err
   ignore $ fPutStr outFile support
+  ignore $ fPutStr outFile (gcPreamble $ gcFlavour opts)
   ignore $ fPutStr outFile (closureHelper opts)
   ignore $ fPutStr outFile $ fastAppend foreignCode
 

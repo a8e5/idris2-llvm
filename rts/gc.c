@@ -16,6 +16,12 @@
 #endif
 extern uint8_t STACKMAP[];
 
+#define GC_FLAVOUR_ZERO 1
+#define GC_FLAVOUR_BDW 2
+#define GC_FLAVOUR_STATEPOINT 3
+
+extern uint32_t rapid_gc_flavour;
+
 static statepoint_table_t *rapid_global_stackmap_table;
 
 void *rapid_C_allocate(Idris_TSO *base, int32_t size) {
@@ -329,5 +335,7 @@ rapid_gc_finalize_stats(Idris_TSO *base) {
 }
 
 void rapid_gc_init() {
-  rapid_global_stackmap_table = generate_table((void *)STACKMAP, 0.5);
+  if (rapid_gc_flavour == GC_FLAVOUR_STATEPOINT) {
+    rapid_global_stackmap_table = generate_table((void *)STACKMAP, 0.5);
+  }
 }
