@@ -17,6 +17,7 @@ import Core.TT
 import Data.Utils
 import Libraries.Data.SortedMap
 import Libraries.Utils.Hex
+import Rapid.Common
 
 OBJECT_TYPE_ID_CON_NO_ARGS : Int
 OBJECT_TYPE_ID_CON_NO_ARGS = 0xff
@@ -3297,19 +3298,23 @@ getForeignFunctionIR debug i name cs args ret = do
        (_, _) => addError $ "missing foreign: " ++ show name ++ " <- " ++ show cs
 
 export
-compileForeign : Bool -> (Int, (Name, NamedDef)) -> String
-compileForeign debug (i, (n, MkNmForeign cs args ret)) = (runCodegen $ getForeignFunctionIR debug i n cs args ret) ++ "\n"
-compileForeign debug _ = "\n"
+compileForeign : CompileOpts -> (Int, (Name, NamedDef)) -> String
+compileForeign opts (i, (n, MkNmForeign cs args ret)) =
+  let debug = debugEnabled opts in
+      (runCodegen opts $ getForeignFunctionIR debug i n cs args ret) ++ "\n"
+compileForeign opts _ = "\n"
 
 export
-getVMIR : Bool -> SortedMap Name Int -> (Int, (Name, VMDef)) -> String
-getVMIR debug conNames (i, n, MkVMFun args body) = (runCodegen $ getFunIR debug conNames ((2*i)+1000) n (map Loc args) body) ++ closureEntry where
-  closureEntry : String
-  closureEntry = if (cast $ length args) <= FAT_CLOSURE_LIMIT
+getVMIR : CompileOpts -> SortedMap Name Int -> (Int, (Name, VMDef)) -> String
+getVMIR opts conNames (i, n, MkVMFun args body) =
+  let debug = debugEnabled opts in
+  let closureEntry = if (cast $ length args) <= FAT_CLOSURE_LIMIT
                     then ""
                     else case args of
                               [] => ""
-                              neArgs@(_::_) => runCodegen $ getFunIRClosureEntry debug conNames ((2*i + 1)+1000) n neArgs body
+                              neArgs@(_::_) => runCodegen opts $ getFunIRClosureEntry debug conNames ((2*i + 1)+1000) n neArgs body
+                              in
+      (runCodegen opts $ getFunIR debug conNames ((2*i)+1000) n (map Loc args) body) ++ closureEntry where
 getVMIR _ _ _ = ""
 
 funcPtrTypes : String
@@ -3413,10 +3418,10 @@ applyClosureHelperFunc = do
   appendCode "unreachable"
 
 export
-closureHelper : String
-closureHelper = fastAppend [
+closureHelper : CompileOpts -> String
+closureHelper opts = fastAppend [
   funcPtrTypes,
   "\ndefine fastcc %Return1 @idris_apply_closure(%RuntimePtr %HpArg, %TSOPtr %BaseArg, %RuntimePtr %HpLimArg, %ObjPtr %closureObjArg, %ObjPtr %argumentObjArg) gc \"statepoint-example\" {\n",
-  runCodegen applyClosureHelperFunc,
+  runCodegen opts applyClosureHelperFunc,
   "\n}\n\n"
   ]

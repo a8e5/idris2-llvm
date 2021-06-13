@@ -36,6 +36,11 @@ runShell args = do
        err_rc => do putStrLn $ "command failed with exit code " ++ show err_rc
                     exitFailure
 
+abort : String -> IO ()
+abort msg = do
+  ignore $ fPutStrLn stderr ("error: " ++ msg)
+  exitFailure
+
 globalizeStackmap : String -> IO Bool
 globalizeStackmap fname = do
   (Right outFile) <- openFile fname Append
@@ -80,6 +85,8 @@ compile defs tmpDir outputDir term outfile = do
     | Left err => (coreLift_ $ fPutStrLn stderr err) >> (pure Nothing)
   coreLift_ $ fPutStrLn stderr ("selected GC strategy: " ++ show gc)
 
+  let opts = MkCompileOpts debug False gc
+
   -- load supporting files first, so we can fail early
   support <- readDataFile $ "rapid" </> "support.ll"
   runtime <- findDataFile $ "rapid" </> "runtime.bc"
@@ -91,17 +98,20 @@ compile defs tmpDir outputDir term outfile = do
   let foreigns = map (\(n,_,d) => (n,d)) $ filter isFgn $ namedDefs cd
   let allFunctions = vmcode cd
   let optFlags = [
-    "-mem2reg", "-instsimplify", "-constmerge", "-sccp", "-dce", "-globaldce",
-    "-rewrite-statepoints-for-gc"]
+    "-mem2reg", "-instsimplify", "-constmerge", "-sccp", "-dce", "-globaldce"
+    ]
+  let gcPassFlags = if (gc == Statepoint) then ["-rewrite-statepoints-for-gc"] else []
 
-  coreLift_ $ writeIR allFunctions foreigns support outputFileName debug
+  coreLift_ $ writeIR allFunctions foreigns support outputFileName opts
 
   let lateTransformFlags = ["-rapid-lower"]
   coreLift $ do
-    runShell $ ["opt", outputFileName, "-load=" ++ rapidLLVMPlugin] ++ optFlags ++ lateTransformFlags ++ ["-o=" ++ bcFileName]
+    runShell $ ["opt", outputFileName, "-load-pass-plugin=" ++ rapidLLVMPlugin, "-load=" ++ rapidLLVMPlugin] ++ optFlags ++ gcPassFlags ++ lateTransformFlags ++ ["-o=" ++ bcFileName]
     runShell ["llc", "--frame-pointer=all", "-tailcallopt", "-o=" ++ asmFileName, bcFileName]
-    True <- globalizeStackmap asmFileName
-    | False => putStrLn "error"
+    when (gc == Statepoint) $ do
+      True <- globalizeStackmap asmFileName
+      | False => abort "error"
+      pure ()
     runShell ["clang", "-c", "-o", objectFileName, asmFileName]
     runShell ["clang", "-o", binaryFileName, objectFileName, runtime, platformLib, "-lm", "-L/usr/local/lib", "-lgmp"]
 
