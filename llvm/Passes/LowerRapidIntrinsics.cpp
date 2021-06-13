@@ -3,6 +3,8 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/Passes/PassBuilder.h"
+#include "llvm/Passes/PassPlugin.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include "llvm/IR/LegacyPassManager.h"
@@ -28,18 +30,10 @@ static void replaceInstruction(
 
 
 namespace {
-struct LowerRapidIntrinsics : public FunctionPass {
-  static char ID;
-  Function *rapid_boxint;
-  Function *rapid_unboxint;
-  Function *rapid_isdirect;
-  LowerRapidIntrinsics() : FunctionPass(ID) {}
-
-  bool doInitialization(Module &M) override {
-    rapid_boxint = M.getFunction("llvm.rapid.boxint");
-    rapid_unboxint = M.getFunction("llvm.rapid.unboxint");
-    rapid_isdirect = M.getFunction("llvm.rapid.isdirect");
-    return false;
+struct LowerRapidIntrinsics : public PassInfoMixin<LowerRapidIntrinsics> {
+  PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM) {
+    runOnFunction(F);
+    return PreservedAnalyses::none();
   }
 
   Value *lowerBoxint(CallInst *target, Function &F) {
@@ -90,7 +84,12 @@ struct LowerRapidIntrinsics : public FunctionPass {
     return cmpEq1;
   }
 
-  bool runOnFunction(Function &F) override {
+  bool runOnFunction(Function &F) {
+    auto &M = *F.getParent();
+    Function *rapid_boxint = M.getFunction("llvm.rapid.boxint");
+    Function *rapid_unboxint = M.getFunction("llvm.rapid.unboxint");
+    Function *rapid_isdirect = M.getFunction("llvm.rapid.isdirect");
+
     for (BasicBlock &BB : F) {
       for (auto it = BB.begin(); it != BB.end();) {
         auto *CI = dyn_cast<CallInst>(&*it);
@@ -100,7 +99,6 @@ struct LowerRapidIntrinsics : public FunctionPass {
         }
 
         auto callee = CI->getCalledFunction();
-        assert(callee);
 
         if (callee == rapid_boxint) {
           //errs().write_escaped("found rapid.boxint") << '\n';
@@ -120,10 +118,44 @@ struct LowerRapidIntrinsics : public FunctionPass {
     return false;
   }
 };
+
+struct LowerRapidIntrinsicsLegacy : public FunctionPass {
+  static char ID;
+  LowerRapidIntrinsics ModernPass;
+  LowerRapidIntrinsicsLegacy() : FunctionPass(ID) {}
+
+  bool doInitialization(Module &M) override {
+    return false;
+  }
+
+  bool runOnFunction(Function &F) override {
+    return ModernPass.runOnFunction(F);
+  }
+};
 }
 
-
-char LowerRapidIntrinsics::ID = 0;
-static RegisterPass<LowerRapidIntrinsics> X("rapid-lower", "Lower Rapid Intrinsics",
+// Register pass with the legacy pass manager
+char LowerRapidIntrinsicsLegacy::ID = 0;
+static RegisterPass<LowerRapidIntrinsicsLegacy> X("rapid-lower", "Lower Rapid Intrinsics",
                              false /* Only looks at CFG */,
                              false /* Analysis Pass */);
+
+// Register pass with the new pass manager
+extern "C" ::llvm::PassPluginLibraryInfo LLVM_ATTRIBUTE_WEAK
+llvmGetPassPluginInfo() {
+  return {
+    LLVM_PLUGIN_API_VERSION, "LowerRapidIntrinsics", "0.0.1",
+    [](PassBuilder &PB) {
+      PB.registerPipelineParsingCallback(
+        [](StringRef Name, FunctionPassManager &FPM,
+        ArrayRef<PassBuilder::PipelineElement>) {
+          if(Name == "rapid-lower"){
+            FPM.addPass(LowerRapidIntrinsics());
+            return true;
+          }
+          return false;
+        }
+      );
+    }
+  };
+}

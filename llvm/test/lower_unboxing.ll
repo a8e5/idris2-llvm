@@ -1,4 +1,5 @@
 ; RUN: opt -load ../librapid.so -rapid-lower -S < %s | FileCheck %s
+; RUN: opt -load-pass-plugin=../librapid.so -passes=rapid-lower -S < %s | FileCheck %s
 target datalayout = "e-m:o-i64:64-f80:128-n8:16:32:64-S128-ni:1"
 
 %Object = type {
