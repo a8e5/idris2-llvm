@@ -10,8 +10,12 @@ ConstDef : Type
 ConstDef = (String, String)
 
 export
-data CGBuffer : Type where
-  MkCGBuf : Int -> List ConstDef -> List String -> List String -> CGBuffer
+record CGBuffer where
+  constructor MkCGBuf
+  i : Int
+  consts : List ConstDef
+  code : List String
+  errors : List String
 
 public export
 Codegen : Type -> Type
