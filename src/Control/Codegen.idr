@@ -27,8 +27,8 @@ emptyCG : CompileOpts -> CGBuffer
 emptyCG opts = MkCGBuf opts 0 [] [] []
 
 export
-opts : Codegen CompileOpts
-opts = (.opts) <$> get
+getOpts : Codegen CompileOpts
+getOpts = (.opts) <$> get
 
 export
 appendCode : String -> Codegen ()

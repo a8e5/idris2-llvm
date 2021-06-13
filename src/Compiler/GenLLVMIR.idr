@@ -2636,9 +2636,10 @@ appendMetadata o value = do
   appendCode ("  " ++ varname ++ " = " ++ value)
   pure varname
 
-getFunIR : Bool -> SortedMap Name Int -> Int -> Name -> List Reg -> List VMInst -> Codegen ()
-getFunIR debug conNames i n args body = do
+getFunIR : SortedMap Name Int -> Int -> Name -> List Reg -> List VMInst -> Codegen ()
+getFunIR conNames i n args body = do
     fargs <- traverse argIR args
+    debug <- debugEnabled <$> getOpts
     let visibility = if debug then "external" else "private"
     debugInfo <- if (not debug) then pure "" else do
       funTmd <- appendMetadata i "!DISubroutineType(types: !{null, !0, !0, !0, !1})"
@@ -2656,8 +2657,9 @@ getFunIR debug conNames i n args body = do
     copyArg (Loc i) = let r = show i in "  %v" ++ r ++ "Var = alloca %ObjPtr\n  store %ObjPtr %v" ++ r ++ ", %ObjPtr* %v" ++ r ++ "Var"
     copyArg _ = "ERROR: not an argument"
 
-getFunIRClosureEntry : Bool -> SortedMap Name Int -> Int -> Name -> (args : List Int) -> {auto ok : NonEmpty args} -> List VMInst -> Codegen ()
-getFunIRClosureEntry debug conNames i n args body = do
+getFunIRClosureEntry : SortedMap Name Int -> Int -> Name -> (args : List Int) -> {auto ok : NonEmpty args} -> List VMInst -> Codegen ()
+getFunIRClosureEntry conNames i n args body = do
+    debug <- debugEnabled <$> getOpts
     let visibility = if debug then "external" else "private"
     appendCode ("\n\ndefine " ++ visibility ++ " fastcc %Return1 @" ++ safeName n ++ "$$closureEntry(" ++ (showSep ", " $ prepareArgCallConv ["%ObjPtr %clObj", "%ObjPtr %lastArg"]) ++ ") gc \"statepoint-example\" {")
     appendCode "entry:"
@@ -3288,8 +3290,8 @@ findForeignName cs =
        Just found => Just (substr 6 99999 found)
        Nothing => choiceMap (\n => lookup n foreignRedirectMap) cs
 
-getForeignFunctionIR : Bool -> Int -> Name -> List String -> List CFType -> CFType -> Codegen ()
-getForeignFunctionIR debug i name cs args ret = do
+getForeignFunctionIR : Int -> Name -> List String -> List CFType -> CFType -> Codegen ()
+getForeignFunctionIR i name cs args ret = do
   let found = findForeignName cs
   let builtin = found >>= ((flip lookup) builtinPrimitives)
   case (builtin, found) of
@@ -3301,7 +3303,7 @@ export
 compileForeign : CompileOpts -> (Int, (Name, NamedDef)) -> String
 compileForeign opts (i, (n, MkNmForeign cs args ret)) =
   let debug = debugEnabled opts in
-      (runCodegen opts $ getForeignFunctionIR debug i n cs args ret) ++ "\n"
+      (runCodegen opts $ getForeignFunctionIR i n cs args ret) ++ "\n"
 compileForeign opts _ = "\n"
 
 export
@@ -3312,9 +3314,9 @@ getVMIR opts conNames (i, n, MkVMFun args body) =
                     then ""
                     else case args of
                               [] => ""
-                              neArgs@(_::_) => runCodegen opts $ getFunIRClosureEntry debug conNames ((2*i + 1)+1000) n neArgs body
+                              neArgs@(_::_) => runCodegen opts $ getFunIRClosureEntry conNames ((2*i + 1)+1000) n neArgs body
                               in
-      (runCodegen opts $ getFunIR debug conNames ((2*i)+1000) n (map Loc args) body) ++ closureEntry where
+      (runCodegen opts $ getFunIR conNames ((2*i)+1000) n (map Loc args) body) ++ closureEntry where
 getVMIR _ _ _ = ""
 
 funcPtrTypes : String
