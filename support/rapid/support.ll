@@ -335,52 +335,6 @@ gc_enter:
   ret %Return1 %gcresult
 }
 
-define private fastcc %Return1 @_extprim_Data.IORef.prim__newIORef(%RuntimePtr %HpArg, %TSOPtr %BaseArg, %RuntimePtr %HpLimArg, %ObjPtr %discard0, %ObjPtr %val, %ObjPtr %world) gc "statepoint-example" {
-  %allocated.ret = call fastcc %Return1 @rapid_allocate_fast (%RuntimePtr %HpArg, %TSOPtr %BaseArg, %RuntimePtr %HpLimArg, i64 16)
-  %hpnew = extractvalue %Return1 %allocated.ret, 0
-  %hplimnew = extractvalue %Return1 %allocated.ret, 1
-  %newobj = extractvalue %Return1 %allocated.ret, 2
-
-  %objptr = bitcast %ObjPtr %newobj to %i64p1
-  %hdr.ptr = getelementptr inbounds i64, %i64p1 %objptr, i64 0
-  ; putObjectHeader 0x05 `shl` 32
-  store i64 21474836480, %i64p1 %hdr.ptr
-
-  %ref.ptr = getelementptr inbounds i64, %i64p1 %objptr, i64 1
-  %ref.objptr = bitcast %i64p1 %ref.ptr to %ObjPtrPtr
-  store %ObjPtr %val, %ObjPtrPtr %ref.objptr
-
-  %packed1 = insertvalue %Return1 undef, %RuntimePtr %hpnew, 0
-  %packed2 = insertvalue %Return1 %packed1, %RuntimePtr %hplimnew, 1
-  %packed3 = insertvalue %Return1 %packed2, %ObjPtr %newobj, 2
-  ret %Return1 %packed3
-}
-
-define private fastcc %Return1 @_extprim_Data.IORef.prim__readIORef(%RuntimePtr %HpArg, %TSOPtr %BaseArg, %RuntimePtr %HpLimArg, %ObjPtr %discard0, %ObjPtr %ref, %ObjPtr %world) alwaysinline gc "statepoint-example" {
-  %objptr = bitcast %ObjPtr %ref to %i64p1
-  %payload.ptr = getelementptr inbounds i64, %i64p1 %objptr, i64 1
-  %payload.objptr = bitcast %i64p1 %payload.ptr to %ObjPtrPtr
-  %payload.obj = load %ObjPtr, %ObjPtrPtr %payload.objptr
-
-  %packed1 = insertvalue %Return1 undef, %RuntimePtr %HpArg, 0
-  %packed2 = insertvalue %Return1 %packed1, %RuntimePtr %HpLimArg, 1
-  %packed3 = insertvalue %Return1 %packed2, %ObjPtr %payload.obj, 2
-  ret %Return1 %packed3
-}
-
-define private fastcc %Return1 @_extprim_Data.IORef.prim__writeIORef(%RuntimePtr %HpArg, %TSOPtr %BaseArg, %RuntimePtr %HpLimArg, %ObjPtr %discard0, %ObjPtr %ref, %ObjPtr %val, %ObjPtr %world) alwaysinline gc "statepoint-example" {
-  %objptr = bitcast %ObjPtr %ref to %i64p1
-  %payload.ptr = getelementptr inbounds i64, %i64p1 %objptr, i64 1
-  %payload.objptr = bitcast %i64p1 %payload.ptr to %ObjPtrPtr
-  ; future write barrier required?
-  store %ObjPtr %val, %ObjPtrPtr %payload.objptr
-
-  %packed1 = insertvalue %Return1 undef, %RuntimePtr %HpArg, 0
-  %packed2 = insertvalue %Return1 %packed1, %RuntimePtr %HpLimArg, 1
-  %packed3 = insertvalue %Return1 %packed2, %ObjPtr null, 2
-  ret %Return1 %packed3
-}
-
 define private fastcc i64 @idris_enter_stackbridge(%TSOPtr %BaseTSO, i8* %heapStart, i8* %heapEnd) {
   %result = call fastcc %Return1 @_$7b__mainExpression$3a0$7d(%RuntimePtr %heapStart, %TSOPtr %BaseTSO, %RuntimePtr %heapEnd)
   ;call hhvmcc %Return1 @Main$2e$7bmain$3a0$7d(%RuntimePtr %heapStart, %RuntimePtr %BaseTSO, %RuntimePtr %heapEnd, %ObjPtr undef)

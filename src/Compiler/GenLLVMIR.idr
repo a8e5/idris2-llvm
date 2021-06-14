@@ -2621,6 +2621,20 @@ compileExtPrim i (NS ns n) r args with (unsafeUnfoldNamespace ns)
   compileExtPrim i (NS ns (UN "prim__void")) r _ | ["Uninhabited", "Prelude"] = do
     appendCode $ "  call ccc void @rapid_crash(i8* bitcast ([23 x i8]* @error_msg_void to i8*)) noreturn"
     appendCode $ "unreachable"
+  compileExtPrim i (NS ns (UN "prim__newIORef")) r [_, val, _] | ["IORef", "Data"] = do
+    ioRefObj <- dynamicAllocate (Const I64 8)
+    putObjectHeader ioRefObj !(mkHeader OBJECT_TYPE_ID_IOREF (Const I32 0))
+    putObjectSlot ioRefObj (Const I64 0) !(load $ reg2val val)
+    store ioRefObj (reg2val r)
+  compileExtPrim i (NS ns (UN "prim__readIORef")) r [_, ioRefArg, _] | ["IORef", "Data"] = do
+    ioRefObj <- load $ reg2val ioRefArg
+    payload <- getObjectSlot ioRefObj 0
+    store payload (reg2val r)
+  compileExtPrim i (NS ns (UN "prim__writeIORef")) r [_, ioRefArg, payloadArg, _] | ["IORef", "Data"] = do
+    ioRefObj <- load $ reg2val ioRefArg
+    payload <- load $ reg2val payloadArg
+    putObjectSlot ioRefObj (Const I64 0) payload
+    store !(mkUnit) (reg2val r)
   compileExtPrim i (NS ns n) r args | _ = compileExtPrimFallback (NS ns n) r args
 compileExtPrim i n r args = compileExtPrimFallback n r args
 
