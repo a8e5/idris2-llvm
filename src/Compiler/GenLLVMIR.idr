@@ -433,8 +433,8 @@ funcReturn = do
   ret3 <- assignSSA $ "insertvalue %Return1 " ++ ret2 ++ ", " ++ toIR finRVal ++ ", 2"
   appendCode $ "ret %Return1 " ++ ret3
 
-dynamicAllocateInto : String -> IRValue I64 -> Codegen ()
-dynamicAllocateInto destVarName payloadSize = do
+dynamicAllocateInto : GCFlavour -> String -> IRValue I64 -> Codegen ()
+dynamicAllocateInto Statepoint destVarName payloadSize = do
   totalSize <- mkAddNoWrap payloadSize HEADER_SIZE
 
   hp <- ((++) "%RuntimePtr ") <$> assignSSA "load %RuntimePtr, %RuntimePtr* %HpVar"
@@ -447,11 +447,22 @@ dynamicAllocateInto destVarName payloadSize = do
   newHpLim <- assignSSA $ "extractvalue %Return1 " ++ allocated ++ ", 1"
   appendCode $ "store %RuntimePtr " ++ newHpLim ++ ", %RuntimePtr* %HpLimVar"
   appendCode $ destVarName ++ " = extractvalue %Return1 " ++ allocated ++ ", 2"
+dynamicAllocateInto Zero destVarName payloadSize = do
+  payloadSizePlus7 <- mkAddNoWrap payloadSize (Const I64 7)
+  payloadSizeAligned <- mkAnd payloadSizePlus7 (Const I64 (-8))
+  totalSize <- mkAddNoWrap payloadSizeAligned HEADER_SIZE
+  appendCode $ destVarName ++ " = call ccc %ObjPtr @malloc(" ++ toIR totalSize ++ ")"
+dynamicAllocateInto BDW destVarName payloadSize = do
+  payloadSizePlus7 <- mkAddNoWrap payloadSize (Const I64 7)
+  payloadSizeAligned <- mkAnd payloadSizePlus7 (Const I64 (-8))
+  totalSize <- mkAddNoWrap payloadSizeAligned HEADER_SIZE
+  appendCode $ destVarName ++ " = call ccc %ObjPtr @GC_malloc(" ++ toIR totalSize ++ ")"
 
 dynamicAllocate : IRValue I64 -> Codegen (IRValue IRObjPtr)
 dynamicAllocate payloadSize = do
   varName <- mkVarName "%a"
-  dynamicAllocateInto varName payloadSize
+  gc <- gcFlavour <$> getOpts
+  dynamicAllocateInto gc varName payloadSize
   pure $ SSA IRObjPtr varName
 
 mkTrunc : {to : IRType} -> IRValue from -> Codegen (IRValue to)
@@ -2983,7 +2994,8 @@ mk_prelude_fastUnpack [strObj] = do
 
   beginLabel loopBodyLbl
 
-  dynamicAllocateInto (showWithoutType nextTail) (Const I64 16)
+  gc <- gcFlavour <$> getOpts
+  dynamicAllocateInto gc (showWithoutType nextTail) (Const I64 16)
   putObjectHeader nextTail !(mkHeader (OBJECT_TYPE_ID_CON_NO_ARGS + 0x200) TAG_LIST_CONS)
   putObjectSlot currentTail (Const I64 1) nextTail
 

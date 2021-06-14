@@ -300,6 +300,8 @@ define private fastcc i1 @rapid.ptrisnull(%ObjPtr noalias nocapture nofree reado
   ret i1 %isnull
 }
 
+declare ccc %ObjPtr @malloc(i64)
+
 define external fastcc %Return1 @rapid_allocate_fast (%RuntimePtr %HpPtrArg, %TSOPtr %BaseArg, %RuntimePtr %HpLimPtrArg, i64 %size) noinline nounwind gc "statepoint-example" {
   %Hp = ptrtoint %RuntimePtr %HpPtrArg to i64
 

@@ -101,6 +101,7 @@ compile defs tmpDir outputDir term outfile = do
     "-mem2reg", "-instsimplify", "-constmerge", "-sccp", "-dce", "-globaldce"
     ]
   let gcPassFlags = if (gc == Statepoint) then ["-rewrite-statepoints-for-gc"] else []
+  let gcLDFlags = if (gc == BDW) then ["-lgc"] else []
 
   coreLift_ $ writeIR allFunctions foreigns support outputFileName opts
 
@@ -113,7 +114,7 @@ compile defs tmpDir outputDir term outfile = do
       | False => abort "error"
       pure ()
     runShell ["clang", "-c", "-o", objectFileName, asmFileName]
-    runShell ["clang", "-o", binaryFileName, objectFileName, runtime, platformLib, "-lm", "-L/usr/local/lib", "-lgmp"]
+    runShell $ ["clang", "-o", binaryFileName, objectFileName, runtime, platformLib, "-L/usr/local/lib", "-lm", "-lgmp"] ++ gcLDFlags
 
     pure ()
 

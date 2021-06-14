@@ -17,11 +17,27 @@ import Rapid.Common
 import Compiler.GenLLVMIR
 import Compiler.PrepareCode
 
+gcStubs : GCFlavour -> String
+gcStubs Statepoint =
+  """
+  define external ccc void @GC_init() { call ccc void @idris_rts_crash(i64 76) noreturn \n unreachable }
+  define external ccc void @GC_disable() { call ccc void @idris_rts_crash(i64 76) noreturn \n unreachable }
+  define external ccc i8* @GC_malloc() { call ccc void @idris_rts_crash(i64 76) noreturn \n unreachable }
+  \n
+  """
+gcStubs BDW =
+  """
+  @_LLVM_StackMaps = constant [1 x i8] [i8 0]\n@__LLVM_StackMaps = constant [1 x i8] [i8 0]
+  declare ccc %ObjPtr @GC_malloc(i64)
+  declare ccc %ObjPtr @GC_malloc_atomic(i64)
+  \n
+  """
+gcStubs Zero = gcStubs BDW
+
 gcPreamble : GCFlavour -> String
 gcPreamble gc =
   ("@rapid_gc_flavour = constant i32 " ++ (show $ encodeGCFlavourAsInt gc) ++ "\n")
-    ++ if (gc /= Statepoint) then "@_LLVM_StackMaps = constant [1 x i8] [i8 0]\n@__LLVM_StackMaps = constant [1 x i8] [i8 0]\n"
-                             else ""
+    ++ gcStubs gc
 
 export
 writeIR : (functions : List (Name, VMDef)) -> (foreigns : List (Name, NamedDef)) ->

@@ -6,6 +6,8 @@
 
 #include <time.h>
 
+#include <gc/gc.h>
+
 #if !defined(__APPLE__)
   #define STACKMAP __LLVM_StackMaps
 #else
@@ -24,14 +26,17 @@ extern uint32_t rapid_gc_flavour;
 
 static statepoint_table_t *rapid_global_stackmap_table;
 
+static inline uint32_t aligned(uint32_t size) {
+  return 8 * ((size + 7) / 8);
+}
+
 void *rapid_C_allocate(Idris_TSO *base, int32_t size) {
+  if (rapid_gc_flavour == GC_FLAVOUR_BDW) {
+    return GC_malloc(aligned(size));
+  }
   void *m = malloc(size);
   assert(((0x0f & (uint64_t)m) == 0) && "rapid_C_allocate returned non-aligned memory");
   return m;
-}
-
-static inline uint32_t aligned(uint32_t size) {
-  return 8 * ((size + 7) / 8);
 }
 
 #define DERIVED_PTRSLOT_GET_BASE_IDX(p) (((p).kind) >> 1)
@@ -337,5 +342,8 @@ rapid_gc_finalize_stats(Idris_TSO *base) {
 void rapid_gc_init() {
   if (rapid_gc_flavour == GC_FLAVOUR_STATEPOINT) {
     rapid_global_stackmap_table = generate_table((void *)STACKMAP, 0.5);
+  }
+  if (rapid_gc_flavour == GC_FLAVOUR_BDW) {
+    GC_INIT();
   }
 }
