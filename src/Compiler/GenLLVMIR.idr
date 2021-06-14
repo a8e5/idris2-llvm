@@ -1259,13 +1259,10 @@ andInteger i1 i2 = do
     newObj <- dynamicAllocate newSize
     putObjectHeader newObj !(mkHeader OBJECT_TYPE_ID_BIGINT !(mkTrunc newLength))
 
-    newPayload <- getObjectPayloadAddr {t=I8} newObj
-    shortPayload <- getObjectPayloadAddr {t=I8} short
-    appendCode $ "  call void @llvm.memcpy.p1i8.p1i8.i64(" ++ toIR newPayload ++ ", " ++ toIR shortPayload ++ ", " ++ toIR newSize++ ", i1 false)"
-
     newLimbs <- getObjectPayloadAddr {t=I64} newObj
+    shortLimbs <- getObjectPayloadAddr {t=I64} short
     longLimbs <- getObjectPayloadAddr {t=I64} long
-    voidCall "ccc" "@__gmpn_and_n" [toIR newLimbs, toIR newLimbs, toIR longLimbs, toIR newLength]
+    voidCall "ccc" "@__gmpn_and_n" [toIR newLimbs, toIR shortLimbs, toIR longLimbs, toIR newLength]
 
     normaliseIntegerSize newObj !(mkTrunc newLength) (Const I1 0)
 
