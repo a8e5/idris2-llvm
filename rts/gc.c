@@ -6,8 +6,6 @@
 
 #include <time.h>
 
-#include <gc/gc.h>
-
 #if !defined(__APPLE__)
   #define STACKMAP __LLVM_StackMaps
 #else
@@ -23,6 +21,11 @@ extern uint8_t STACKMAP[];
 #define GC_FLAVOUR_STATEPOINT 3
 
 extern uint32_t rapid_gc_flavour;
+
+// Define selected BDW GC functions, so we don't need BDW's gc/gc.h installed
+// to compile the RTS lib.
+extern void *GC_malloc(size_t);
+extern void GC_init(void);
 
 static statepoint_table_t *rapid_global_stackmap_table;
 
@@ -344,6 +347,6 @@ void rapid_gc_init() {
     rapid_global_stackmap_table = generate_table((void *)STACKMAP, 0.5);
   }
   if (rapid_gc_flavour == GC_FLAVOUR_BDW) {
-    GC_INIT();
+    GC_init();
   }
 }
