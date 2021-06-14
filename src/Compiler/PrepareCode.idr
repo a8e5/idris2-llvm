@@ -3,6 +3,7 @@ module Compiler.PrepareCode
 import Data.Maybe
 
 import Core.Name
+import Core.TT
 import Compiler.VMCode
 import Libraries.Data.SortedMap
 
@@ -15,6 +16,7 @@ mutual
   constructorNamesInst : VMInst -> List Name
   constructorNamesInst (MKCON _ (Right n) _) = [n]
   constructorNamesInst (CASE _ alts def) = concatMap constructorNamesAlt alts ++ collectConstructorNames (fromMaybe [] def)
+  constructorNamesInst (CONSTCASE _ alts def) = concatMap (collectConstructorNames . snd) alts ++ collectConstructorNames (fromMaybe [] def)
   constructorNamesInst _ = []
 
   constructorNamesAlt : (Either Int Name, List VMInst) -> List Name
