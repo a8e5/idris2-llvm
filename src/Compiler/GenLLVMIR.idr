@@ -1265,9 +1265,9 @@ andInteger i1 i2 = do
 
     newLimbs <- getObjectPayloadAddr {t=I64} newObj
     longLimbs <- getObjectPayloadAddr {t=I64} long
-    voidCall "ccc" "@__gmpn_and_n" [toIR newLimbs, toIR newLimbs, toIR longLimbs, toIR newSize]
+    voidCall "ccc" "@__gmpn_and_n" [toIR newLimbs, toIR newLimbs, toIR longLimbs, toIR newLength]
 
-    normaliseIntegerSize newObj !(mkTrunc newSize) (Const I1 0)
+    normaliseIntegerSize newObj !(mkTrunc newLength) (Const I1 0)
 
     pure newObj
     )
@@ -1341,7 +1341,7 @@ xorInteger i1 i2 = do
     shortLimbs <- getObjectPayloadAddr {t=I64} short
     voidCall "ccc" "@__gmpn_xor_n" [toIR newLimbs, toIR newLimbs, toIR shortLimbs, toIR size2]
 
-    normaliseIntegerSize newObj !(mkTrunc newSize) (Const I1 0)
+    normaliseIntegerSize newObj !(mkTrunc newLength) (Const I1 0)
 
     pure newObj
     )

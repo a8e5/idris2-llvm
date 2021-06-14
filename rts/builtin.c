@@ -789,7 +789,11 @@ int64_t rapid_bigint_get_str(ObjPtr destStr, const ObjPtr srcInteger, int base) 
   // that the input buffer size is aligned to 8 byte blocks, we can update 8
   // characters at once.
   s = OBJ_PAYLOAD(destStr);
-  for (int i = 0; i < (numDigits + 7); i += 8) {
+  // We know that the allocated payload size is a multiple of 8, so it is save
+  // to access up to 7 bytes past `numDigits` length, given that i % 8 == 0
+  // In other words, if we can access s[i] (where i % 8 == 0), we can also
+  // access s[i + 7].
+  for (int i = 0; i < (numDigits + needsSign); i += 8) {
     *(uint64_t *)(s + i) = 0x3030303030303030 + *(uint64_t *)(s + i);
   }
   if (needsSign) {

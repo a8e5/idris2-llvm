@@ -27,6 +27,25 @@ eight = 8
 negative : Integer
 negative = -753
 
+integer1Digit : Integer
+integer1Digit = 1
+integer2Digit : Integer
+integer2Digit = 12
+integer3Digit : Integer
+integer3Digit = 123
+integer4Digit : Integer
+integer4Digit = 1234
+integer5Digit : Integer
+integer5Digit = 12345
+integer6Digit : Integer
+integer6Digit = 123456
+integer7Digit : Integer
+integer7Digit = 1234567
+integer8Digit : Integer
+integer8Digit = 12345678
+integer9Digit : Integer
+integer9Digit = 123456789
+
 mult : IO ()
 mult = do
   putStrLn "multiplication:"
@@ -132,3 +151,21 @@ main = do
   putStrLn (show (negative - integer))
   putStrLn (show (integer + negative))
   putStrLn (show (negative + integer))
+  printLn integer1Digit
+  printLn integer2Digit
+  printLn integer3Digit
+  printLn integer4Digit
+  printLn integer5Digit
+  printLn integer6Digit
+  printLn integer7Digit
+  printLn integer8Digit
+  printLn integer9Digit
+  printLn (- integer1Digit)
+  printLn (- integer2Digit)
+  printLn (- integer3Digit)
+  printLn (- integer4Digit)
+  printLn (- integer5Digit)
+  printLn (- integer6Digit)
+  printLn (- integer7Digit)
+  printLn (- integer8Digit)
+  printLn (- integer9Digit)
