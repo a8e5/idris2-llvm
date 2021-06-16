@@ -23,6 +23,19 @@ gcStubs Statepoint =
   define external ccc void @GC_init() { call ccc void @idris_rts_crash(i64 76) noreturn \n unreachable }
   define external ccc void @GC_disable() { call ccc void @idris_rts_crash(i64 76) noreturn \n unreachable }
   define external ccc i8* @GC_malloc() { call ccc void @idris_rts_crash(i64 76) noreturn \n unreachable }
+
+  ; we use 2 weak symbols instead of just the right one, to avoid
+  ; having to generate target-dependent IR
+  @__LLVM_StackMaps = extern_weak global i8
+  ; on Apple platforms, an underscore is added implicitly:
+  @_LLVM_StackMaps = extern_weak global i8
+  define external i8* @get_stackmap() {
+    ; check which reference is non-null and return that one
+    %d = ptrtoint i8* @__LLVM_StackMaps to i64
+    %ok = icmp ne i64 %d, 0
+    %r = select i1 %ok, i8* @__LLVM_StackMaps, i8* @_LLVM_StackMaps
+    ret i8* %r
+  }
   \n
   """
 gcStubs BDW =
@@ -30,6 +43,7 @@ gcStubs BDW =
   @_LLVM_StackMaps = constant [1 x i8] [i8 0]\n@__LLVM_StackMaps = constant [1 x i8] [i8 0]
   declare ccc %ObjPtr @GC_malloc(i64)
   declare ccc %ObjPtr @GC_malloc_atomic(i64)
+  define external i8* @get_stackmap() { call ccc void @idris_rts_crash(i64 76) noreturn \n unreachable }
   \n
   """
 gcStubs Zero = gcStubs BDW

@@ -6,15 +6,7 @@
 
 #include <time.h>
 
-#if !defined(__APPLE__)
-  #define STACKMAP __LLVM_StackMaps
-#else
-  // On Darwin, all symbols are implicitly prefixed with an underscore, which
-  // means we need to subtract one underscore in the C source to match the
-  // assembly's symbol name.
-  #define STACKMAP _LLVM_StackMaps
-#endif
-extern uint8_t STACKMAP[];
+extern void *get_stackmap();
 
 #define GC_FLAVOUR_ZERO 1
 #define GC_FLAVOUR_BDW 2
@@ -344,6 +336,7 @@ rapid_gc_finalize_stats(Idris_TSO *base) {
 
 void rapid_gc_init() {
   if (rapid_gc_flavour == GC_FLAVOUR_STATEPOINT) {
+    void *STACKMAP = get_stackmap();
     rapid_global_stackmap_table = generate_table((void *)STACKMAP, 0.5);
   }
   if (rapid_gc_flavour == GC_FLAVOUR_BDW) {

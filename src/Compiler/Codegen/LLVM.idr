@@ -72,7 +72,6 @@ compile defs tmpDir outputDir term outfile = do
   let appDirGen = outputDir </> appDirRel -- relative to here
   let outputFileName = appDirGen </> (outfile ++ ".ll") -- LLVM IR (text)
   let bcFileName = appDirGen </> (outfile ++ ".bc") -- optimized LLVM bitcode
-  let asmFileName = appDirGen </> (outfile ++ ".s") -- compiled assembler
   let objectFileName = appDirGen </> (outfile ++ ".o") -- object file
   let binaryFileName = outputDir </> outfile
   coreLift_ $ mkdirAll appDirGen
@@ -108,12 +107,7 @@ compile defs tmpDir outputDir term outfile = do
   let lateTransformFlags = ["-rapid-lower"]
   coreLift $ do
     runShell $ ["opt", outputFileName, "-load-pass-plugin=" ++ rapidLLVMPlugin, "-load=" ++ rapidLLVMPlugin] ++ optFlags ++ gcPassFlags ++ lateTransformFlags ++ ["-o=" ++ bcFileName]
-    runShell ["llc", "--frame-pointer=all", "-tailcallopt", "-o=" ++ asmFileName, bcFileName]
-    when (gc == Statepoint) $ do
-      True <- globalizeStackmap asmFileName
-      | False => abort "error"
-      pure ()
-    runShell ["clang", "-c", "-o", objectFileName, asmFileName]
+    runShell ["llc", "--frame-pointer=all", "-tailcallopt", "--filetype=obj", "-o=" ++ objectFileName, bcFileName]
     runShell $ ["clang", "-o", binaryFileName, objectFileName, runtime, platformLib, "-L/usr/local/lib", "-lm", "-lgmp"] ++ gcLDFlags
 
     pure ()
