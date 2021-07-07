@@ -25,12 +25,24 @@ check if that is the case, try the following command:
 
 GMP needs to be installed (`libgmp-dev` on Debian).
 
-## Compiling
+Make sure you have checked out the Git submodule as well:
 
-    $ make
-    $ make test
+    git submodule update --init --recursive
 
-## Using
+## Compilation
+
+    make
+    IDRIS2_DATA=$PWD/support make test
+
+## Usage
+
+The "support files" (precompiled platform code and runtime system, as well as a
+custom LLVM pass) need to be available in a directory in the `$IDRIS2_DATA`
+path. You can achieve that by running (from within the source dir):
+
+    export IDRIS2_DATA=$PWD/support
+
+(most useful during development) or by running `make install`.
 
     # compile the included "Hello world" example
     ./build/exec/rapidc --cg llvm -o hello samples/Hello.idr

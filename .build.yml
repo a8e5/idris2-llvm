@@ -54,9 +54,6 @@ tasks:
       cd rapid
       git submodule update --init --recursive
 
-      export IDRIS2_DATA="$PWD/support"
-
-      make -C external/llvm-statepoint-utils dist/llvm-statepoint-tablegen.h unified
       make
 
   - test: |
