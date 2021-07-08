@@ -3323,13 +3323,6 @@ getForeignFunctionIR i name cs args ret = do
        (_, _) => addError $ "missing foreign: " ++ show name ++ " <- " ++ show cs
 
 export
-compileForeign : CompileOpts -> (Int, (Name, NamedDef)) -> String
-compileForeign opts (i, (n, MkNmForeign cs args ret)) =
-  let debug = debugEnabled opts in
-      (runCodegen opts $ getForeignFunctionIR i n cs args ret) ++ "\n"
-compileForeign opts _ = "\n"
-
-export
 getVMIR : CompileOpts -> SortedMap Name Int -> (Int, (Name, VMDef)) -> String
 getVMIR opts conNames (i, n, MkVMFun args body) =
   let debug = debugEnabled opts in
@@ -3340,7 +3333,10 @@ getVMIR opts conNames (i, n, MkVMFun args body) =
                               neArgs@(_::_) => runCodegen opts $ getFunIRClosureEntry conNames ((2*i + 1)+1000) n neArgs body
                               in
       (runCodegen opts $ getFunIR conNames ((2*i)+1000) n (map Loc args) body) ++ closureEntry where
-getVMIR _ _ _ = ""
+getVMIR opts conNames (i, (n, MkVMForeign cs args ret)) =
+  let debug = debugEnabled opts in
+      (runCodegen opts $ getForeignFunctionIR i n cs args ret) ++ "\n"
+getVMIR _ _ (i, (n, MkVMError is)) = ""
 
 funcPtrTypes : String
 funcPtrTypes = fastAppend $ map funcPtr (rangeFromTo 0 FAT_CLOSURE_LIMIT) where

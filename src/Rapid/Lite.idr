@@ -58,11 +58,8 @@ main = do
   | Left _ => putStrLn "read file error"
   (Right parsed) <- pure (lexSexp input >>= parseSexp)
   | Left e => putStrLn $ "error:\n" ++ e
-  (Right allFunctions) <- pure $ getVMDefs (filter isVmdef parsed)
+  (Right allFunctions) <- pure $ getVMDefs parsed
   | Left e => putStrLn $ "error parsing VMCode s-exp: " ++ e
-  let foreignSexps = (filter isForeignDecl parsed)
-  (Right foreigns) <- pure $ getForeignDefs foreignSexps
-  | Left e => putStrLn $ "error parsing foreign decls: " ++ e
 
   optimizedFunctions <- if opts.optimizationsEnabled
     then do
@@ -75,4 +72,4 @@ main = do
 
   let opts = MkCompileOpts debug False Statepoint
 
-  writeIR optimizedFunctions foreigns support (filename ++ ".output.ll") opts
+  writeIR optimizedFunctions support (filename ++ ".output.ll") opts

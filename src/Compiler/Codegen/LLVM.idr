@@ -16,10 +16,6 @@ import Libraries.Utils.Path
 import Rapid.Common
 import Rapid.Driver
 
-isFgn : (Name, a, NamedDef) -> Bool
-isFgn (_, _, (MkNmForeign _ _ _)) = True
-isFgn _ = False
-
 shell : List String -> String
 shell args = showSep " " $ map shellQuote args
   where
@@ -94,7 +90,6 @@ compile defs tmpDir outputDir term outfile = do
 
   cd <- getCompileData False VMCode term
   coreLift_ $ fPutStrLn stderr $ "got compiledata"
-  let foreigns = map (\(n,_,d) => (n,d)) $ filter isFgn $ namedDefs cd
   let allFunctions = vmcode cd
   let optFlags = [
     "-mem2reg", "-instsimplify", "-constmerge", "-sccp", "-dce", "-globaldce"
@@ -102,7 +97,7 @@ compile defs tmpDir outputDir term outfile = do
   let gcPassFlags = if (gc == Statepoint) then ["-rewrite-statepoints-for-gc"] else []
   let gcLDFlags = if (gc == BDW) then ["-lgc"] else []
 
-  coreLift_ $ writeIR allFunctions foreigns support outputFileName opts
+  coreLift_ $ writeIR allFunctions support outputFileName opts
 
   let lateTransformFlags = ["-rapid-lower"]
   coreLift $ do

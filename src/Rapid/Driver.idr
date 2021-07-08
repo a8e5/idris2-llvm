@@ -54,10 +54,9 @@ gcPreamble gc =
     ++ gcStubs gc
 
 export
-writeIR : (functions : List (Name, VMDef)) -> (foreigns : List (Name, NamedDef)) ->
+writeIR : (functions : List (Name, VMDef)) ->
           (support : String) -> (outfile : String) -> (opts : CompileOpts) -> IO ()
-writeIR functions foreigns support outfile opts = do
-  let foreignCode = map (compileForeign opts) (enumerate foreigns)
+writeIR functions support outfile opts = do
   let nameMap = getNameMap $ map snd functions
   let indexedFuncs = enumerate functions
   let fcount = length indexedFuncs
@@ -67,7 +66,6 @@ writeIR functions foreigns support outfile opts = do
   ignore $ fPutStr outFile support
   ignore $ fPutStr outFile (gcPreamble $ gcFlavour opts)
   ignore $ fPutStr outFile (closureHelper opts)
-  ignore $ fPutStr outFile $ fastAppend foreignCode
 
   for_ indexedFuncs (\c => do
     -- This dummy IO forces the `getVMIR` calls to wait until it's "their turn",

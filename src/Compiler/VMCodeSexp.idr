@@ -351,19 +351,15 @@ FromSexp VMInst where
     pure $ ERROR msg
   fromSexp sexp = Left $ "vminst not impl" ++ show sexp
 
-public export
-ToSexp VMDef where
-  toSexp (MkVMFun args insts) = SList $ [SAtom "fun", SList $ map (\i => SAtom $ "v" ++ show i) args, SList $ map toSexp insts]
-  toSexp (MkVMError insts) = SList $ [SAtom "error", SList $ map toSexp insts]
+export
+ToSexp CFType where
+  toSexp t = SList [SAtom $ show t]
 
 public export
 ToSexp (Name, VMDef) where
   toSexp (n, (MkVMFun args insts)) = SList $ [SAtom "defun", toSexp n, SList $ map (\i => SAtom $ "v" ++ show i) args, SList $ map toSexp insts]
   toSexp (n, (MkVMError insts)) = SList $ [SAtom "deferr", toSexp n, SList $ map toSexp insts]
-
-export
-ToSexp CFType where
-  toSexp t = SList [SAtom $ show t]
+  toSexp (n, (MkVMForeign cs args ret)) = SList $ [SAtom "foreign", toSexp n, SList $ map SAtom cs, SList $ map toSexp args, toSexp ret]
 
 FromSexp CFType where
   fromSexp (SList [SAtom "Buffer"]) = pure CFBuffer
@@ -381,11 +377,6 @@ FromSexp CFType where
   fromSexp (SList [SAtom "%World"]) = pure CFWorld
   fromSexp s = Left $ "invalid CFType: " ++ show s
 
-export
-ToSexp (Name, NamedDef) where
-  toSexp (n, (MkNmForeign cs args ret)) = SList $ [SAtom "foreign", toSexp n, SList $ map SAtom cs, SList $ map toSexp args, toSexp ret]
-  toSexp (n, _) = SList $ [SAtom "error"]
-
 getArg : Sexp -> Either String Int
 getArg (SAtom s) = maybeToEither "invalid int" $ parseInteger $ assert_total $ strTail s
 getArg x = Left "invalid ARG"
@@ -397,31 +388,14 @@ FromSexp (Name, VMDef) where
     fArgs <- traverse getArg args
     fInsts <- collectFromSexp insts
     pure (name, MkVMFun fArgs fInsts)
-  fromSexp l = Left ("invalid vmdef: " ++ show l)
-
-FromSexp (Name, NamedDef) where
   fromSexp (SList [SAtom "foreign", n, SList extS, SList argsS, retS]) = do
     name <- fromSexp n
     cs <- traverse (unAtom "foreign name") extS
     args <- traverse fromSexp argsS
     ret <- fromSexp retS
-    pure (name, MkNmForeign cs args ret)
-  fromSexp l = Left ("invalid foreign decl: " ++ show l)
+    pure (name, MkVMForeign cs args ret)
+  fromSexp l = Left ("invalid vmdef: " ++ show l)
 
 export
 getVMDefs : List Sexp -> Either String (List (Name, VMDef))
 getVMDefs s = either (\error=>Left ("failed to read VMCode from Sexp: " ++ error ++ "\n")) Right $ traverse fromSexp s
-
-export
-getForeignDefs : List Sexp -> Either String (List (Name, NamedDef))
-getForeignDefs l = traverse fromSexp l
-
-export
-isVmdef : Sexp -> Bool
-isVmdef (SList (SAtom "defun"::_)) = True
-isVmdef _ = False
-
-export
-isForeignDecl : Sexp -> Bool
-isForeignDecl (SList (SAtom "foreign"::_)) = True
-isForeignDecl _ = False

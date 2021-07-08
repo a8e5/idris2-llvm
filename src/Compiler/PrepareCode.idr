@@ -26,6 +26,7 @@ mutual
 getNames : VMDef -> List Name
 getNames (MkVMFun _ is) = collectConstructorNames is
 getNames (MkVMError is) = collectConstructorNames is
+getNames (MkVMForeign _ _ _) = empty
 
 export
 getNameMap : List VMDef -> (SortedMap Name Int)

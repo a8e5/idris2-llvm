@@ -15,10 +15,6 @@ import Libraries.Utils.Path
 import Data.Sexp
 import Compiler.VMCodeSexp
 
-dumpFgn : (Name, FC, NamedDef) -> String
-dumpFgn (n, _, def@(MkNmForeign cs args ret)) = show (toSexp (n, def)) ++ "\n"
-dumpFgn _ = "" -- not a foreign function
-
 dumpDef : (Name, VMDef) -> String
 dumpDef d = (show $ toSexp d) ++ "\n\n"
 
@@ -33,13 +29,11 @@ compile defs tmpDir outputDir term outfile = do
                      pure Nothing
 
   cd <- getCompileData False VMCode term
-  let foreignDecls = map dumpFgn (namedDefs cd)
   let compiledFunctions = map dumpDef (vmcode cd)
 
   coreLift $ do
     (Right outFile) <- openFile outputFileName WriteTruncate
     | Left err => putStrLn $ "error opening output file: " ++ show err
-    ignore $ fPutStr outFile $ fastAppend foreignDecls
     for_ compiledFunctions (fPutStr outFile)
     ignore $ closeFile outFile
     pure ()
