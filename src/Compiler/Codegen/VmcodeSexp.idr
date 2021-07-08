@@ -51,4 +51,4 @@ execute defs tmpDir term = do coreLift $ putStrLn "Can't execute VMCode directly
 
 export
 vmcodeSexp : Codegen
-vmcodeSexp = MkCG compile execute
+vmcodeSexp = MkCG compile execute Nothing Nothing

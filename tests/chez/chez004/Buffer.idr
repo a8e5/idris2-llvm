@@ -38,9 +38,6 @@ main
          ds <- bufferData buf2
          printLn ds
 
-         freeBuffer buf
-         freeBuffer buf2
-
          ignore $ removeFile "test.buf"
 
 -- Put back when the File API is moved to C and these can work again

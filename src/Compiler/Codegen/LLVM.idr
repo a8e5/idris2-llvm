@@ -123,4 +123,4 @@ execute defs tmpDir term = do
 
 export
 rapidCodegen : Codegen
-rapidCodegen = MkCG compile execute
+rapidCodegen = MkCG compile execute Nothing Nothing
