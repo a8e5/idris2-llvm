@@ -24,6 +24,13 @@
 static int rapid_global_argc = 0;
 static char **rapid_global_argv = NULL;
 
+static ObjPtr wrapFilePtr(Idris_TSO *base, FILE *f) {
+  ObjPtr ptrObj = rapid_C_allocate(base, HEADER_SIZE + POINTER_SIZE);
+  ptrObj->hdr = MAKE_HEADER(OBJ_TYPE_OPAQUE, POINTER_SIZE);
+  ptrObj->data = f;
+  return ptrObj;
+}
+
 void rapid_strreverse(char *restrict dst, const char *restrict src, int64_t size) {
   // FIXME: this reverses bytes, not characters (i.e. works only for ASCII)
   for (int64_t i = 0; i < size; ++i) {
@@ -306,17 +313,10 @@ ObjPtr rapid_system_fdopen(Idris_TSO *base, int64_t fd, ObjPtr modeObj, ObjPtr _
     base->rapid_errno = errno;
   }
 
-  ObjPtr ptrObj = rapid_C_allocate(base, HEADER_SIZE + POINTER_SIZE);
-  ptrObj->hdr = MAKE_HEADER(OBJ_TYPE_OPAQUE, POINTER_SIZE);
-  ptrObj->data = f;
-
-  return ptrObj;
+  return wrapFilePtr(base, f);
 }
 
 ObjPtr rapid_system_file_open(Idris_TSO *base, ObjPtr fnameObj, ObjPtr modeObj, ObjPtr _world) {
-  ObjPtr ptrObj = rapid_C_allocate(base, HEADER_SIZE + POINTER_SIZE);
-  ptrObj->hdr = MAKE_HEADER(OBJ_TYPE_OPAQUE, POINTER_SIZE);
-
   int length = OBJ_SIZE(fnameObj);
   const char *str = (const char *)OBJ_PAYLOAD(fnameObj);
   char *fnameCstr = (char *)alloca(length + 1);
@@ -336,9 +336,7 @@ ObjPtr rapid_system_file_open(Idris_TSO *base, ObjPtr fnameObj, ObjPtr modeObj, 
     base->rapid_errno = errno;
   }
 
-  ptrObj->data = f;
-
-  return ptrObj;
+  return wrapFilePtr(base, f);
 }
 
 Word rapid_system_file_remove(Idris_TSO *base, ObjPtr fnameObj, ObjPtr _world) {
