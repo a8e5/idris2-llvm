@@ -1,6 +1,7 @@
 image: freebsd/latest
 
 sources:
+  - https://git.sr.ht/~cypheon/Idris2#rapid
   - https://git.sr.ht/~cypheon/rapid
 
 packages:
@@ -29,8 +30,10 @@ tasks:
       pip install lit
       lit --version
 
-  - install-idris2: |
-      curl -LsSf -o /tmp/idris2_prebuilt.tar.gz "https://sinyax.net/idris2_prebuilt/freebsd.tar.gz"
+  - load-prebuilt-idris2: |
+      cd Idris2
+      idris2_commit=$(git show-ref --hash --head refs/HEAD)
+      curl -LsSf -o /tmp/idris2_prebuilt.tar.gz "https://neo.sinyax.net/cdn/artifacts/idris2_freebsd_${idris2_commit}.tar.gz"
       cd $HOME
       tar xzvf /tmp/idris2_prebuilt.tar.gz
       idris2 --version

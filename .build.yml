@@ -4,7 +4,7 @@ secrets:
   - 847f7bd1-cee2-48a9-93d9-8ebef49c6984
 
 sources:
-  - https://github.com/cypheon/Idris2.git
+  - https://git.sr.ht/~cypheon/Idris2#rapid
   - git@git.sr.ht:~cypheon/rapid
 
 repositories:
@@ -29,26 +29,10 @@ tasks:
   - load-prebuilt-idris2: |
       cd Idris2
       idris2_commit=$(git show-ref --hash --head refs/HEAD)
-      if curl -LsSf -o /tmp/idris2_prebuilt.tar.gz "https://sinyax.net/idris2_prebuilt/${idris2_commit}.tar.gz"; then
-        cd $HOME
-        tar xzvf /tmp/idris2_prebuilt.tar.gz
-        # dummy to prevent build from failing due to missing artifacts
-        touch /tmp/idris2_prebuilt_new.tar.gz
-      fi
-  - install-idris2: |
-      if [[ -d $HOME/.idris2 ]]; then
-        echo prebuilt Idris2 found
-        exit 0
-      else
-        echo prebuilt Idris2 not found, building from scratch
-      fi
-      cd Idris2
-      make bootstrap SCHEME=chezscheme
-      make install
-      make clean
-      make all
-      make install install-api
-      tar czvf /tmp/idris2_prebuilt_new.tar.gz -C "$HOME" .idris2
+      curl -LsSf -o /tmp/idris2_prebuilt.tar.gz "https://neo.sinyax.net/cdn/artifacts/idris2_debian_${idris2_commit}.tar.gz"
+      cd $HOME
+      tar xzvf /tmp/idris2_prebuilt.tar.gz
+      idris2 --version
 
   - build: |
       cd rapid
@@ -60,9 +44,6 @@ tasks:
       cd rapid
       export IDRIS2_DATA="$PWD/support"
       make test
-
-artifacts:
-  - /tmp/idris2_prebuilt_new.tar.gz
 
 triggers:
   - action: email
