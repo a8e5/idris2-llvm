@@ -125,6 +125,35 @@ int64_t rapid_system_system(Idris_TSO *base, ObjPtr cmdObj, ObjPtr _world) {
   return rc;
 }
 
+ObjPtr rapid_system_popen(Idris_TSO *base, ObjPtr cmdStrObj, ObjPtr modeStrObj, ObjPtr _world) {
+  assert(OBJ_TYPE(cmdStrObj) == OBJ_TYPE_STRING);
+  assert(OBJ_TYPE(modeStrObj) == OBJ_TYPE_STRING);
+
+  int cmdLength = OBJ_SIZE(cmdStrObj);
+  char cmdCstr[cmdLength + 1];
+  memcpy(cmdCstr, (const char *)OBJ_PAYLOAD(cmdStrObj), cmdLength);
+  cmdCstr[cmdLength] = '\0';
+
+  int modeLength = OBJ_SIZE(modeStrObj);
+  char modeCstr[modeLength + 1];
+  memcpy(modeCstr, (const char *)OBJ_PAYLOAD(modeStrObj), modeLength);
+  modeCstr[modeLength] = '\0';
+
+  FILE *child = popen(cmdCstr, modeCstr);
+
+  return wrapFilePtr(base, child);
+}
+
+void rapid_system_pclose(Idris_TSO *base, ObjPtr filePtrObj, ObjPtr _world) {
+  if (OBJ_TYPE(filePtrObj) != OBJ_TYPE_OPAQUE || OBJ_SIZE(filePtrObj) != POINTER_SIZE) {
+    rapid_C_crash("invalid object passed to system_pclose");
+  }
+
+  FILE *f = *(FILE **)OBJ_PAYLOAD(filePtrObj);
+  pclose(f);
+}
+
+
 // return type: Ptr String
 ObjPtr rapid_system_get_env(Idris_TSO *base, ObjPtr varObj, ObjPtr _world) {
   assert(OBJ_TYPE(varObj) == OBJ_TYPE_STRING);
