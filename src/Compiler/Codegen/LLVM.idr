@@ -4,6 +4,7 @@ import Data.List
 import Data.String
 import System
 import System.File
+import System.Info
 
 import Core.Directory
 import Core.CompileExpr
@@ -80,7 +81,7 @@ compile defs tmpDir outputDir term outfile = do
     | Left err => (coreLift_ $ fPutStrLn stderr err) >> (pure Nothing)
   coreLift_ $ fPutStrLn stderr ("selected GC strategy: " ++ show gc)
 
-  let opts = MkCompileOpts debug False gc
+  let opts = MkCompileOpts debug False gc os
 
   -- load supporting files first, so we can fail early
   support <- readDataFile $ "rapid" </> "support.ll"

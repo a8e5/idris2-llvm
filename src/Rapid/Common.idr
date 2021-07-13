@@ -29,3 +29,4 @@ record CompileOpts where
   debugEnabled : Bool
   traceEnabled : Bool
   gcFlavour : GCFlavour
+  targetOS : String

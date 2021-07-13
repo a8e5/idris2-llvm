@@ -17,28 +17,8 @@ import Rapid.Common
 import Compiler.GenLLVMIR
 import Compiler.PrepareCode
 
-gcStubs : GCFlavour -> String
-gcStubs Statepoint =
-  """
-  define external ccc void @GC_init() { call ccc void @idris_rts_crash(i64 76) noreturn \n unreachable }
-  define external ccc void @GC_disable() { call ccc void @idris_rts_crash(i64 76) noreturn \n unreachable }
-  define external ccc i8* @GC_malloc() { call ccc void @idris_rts_crash(i64 76) noreturn \n unreachable }
-
-  ; we use 2 weak symbols instead of just the right one, to avoid
-  ; having to generate target-dependent IR
-  @__LLVM_StackMaps = extern_weak global i8
-  ; on Apple platforms, an underscore is added implicitly:
-  @_LLVM_StackMaps = extern_weak global i8
-  define external i8* @get_stackmap() {
-    ; check which reference is non-null and return that one
-    %d = ptrtoint i8* @__LLVM_StackMaps to i64
-    %ok = icmp ne i64 %d, 0
-    %r = select i1 %ok, i8* @__LLVM_StackMaps, i8* @_LLVM_StackMaps
-    ret i8* %r
-  }
-  \n
-  """
-gcStubs BDW =
+gcStubsBDW : String
+gcStubsBDW =
   """
   @_LLVM_StackMaps = constant [1 x i8] [i8 0]\n@__LLVM_StackMaps = constant [1 x i8] [i8 0]
   declare ccc %ObjPtr @GC_malloc(i64)
@@ -46,12 +26,30 @@ gcStubs BDW =
   define external i8* @get_stackmap() { call ccc void @idris_rts_crash(i64 76) noreturn \n unreachable }
   \n
   """
-gcStubs Zero = gcStubs BDW
 
-gcPreamble : GCFlavour -> String
-gcPreamble gc =
-  ("@rapid_gc_flavour = constant i32 " ++ (show $ encodeGCFlavourAsInt gc) ++ "\n")
-    ++ gcStubs gc
+gcStubs : CompileOpts -> String
+gcStubs (MkCompileOpts _ _ Statepoint targetOs) =
+  """
+  define external ccc void @GC_init() { call ccc void @idris_rts_crash(i64 76) noreturn \n unreachable }
+  define external ccc void @GC_disable() { call ccc void @idris_rts_crash(i64 76) noreturn \n unreachable }
+  define external ccc i8* @GC_malloc() { call ccc void @idris_rts_crash(i64 76) noreturn \n unreachable }
+  \n
+  """ ++
+  llvmStackmapsSymbolName ++ " = external global i8\n"
+  ++ "define external i8* @get_stackmap() { ret i8* " ++ llvmStackmapsSymbolName ++ "}\n"
+    where llvmStackmapsSymbolName : String
+          llvmStackmapsSymbolName =
+            if targetOs == "darwin"
+               -- on Apple platforms, an underscore is added implicitly:
+               then "@_LLVM_StackMaps"
+               else "@__LLVM_StackMaps"
+gcStubs (MkCompileOpts _ _ BDW _) = gcStubsBDW
+gcStubs (MkCompileOpts _ _ Zero _) = gcStubsBDW
+
+gcPreamble : CompileOpts -> String
+gcPreamble opts =
+  ("@rapid_gc_flavour = constant i32 " ++ (show $ encodeGCFlavourAsInt $ gcFlavour opts) ++ "\n")
+    ++ gcStubs opts
 
 export
 writeIR : (functions : List (Name, VMDef)) ->
@@ -64,7 +62,7 @@ writeIR functions support outfile opts = do
   (Right outFile) <- openFile outfile WriteTruncate
   | Left err => putStrLn $ "error opening output file: " ++ show err
   ignore $ fPutStr outFile support
-  ignore $ fPutStr outFile (gcPreamble $ gcFlavour opts)
+  ignore $ fPutStr outFile (gcPreamble opts)
   ignore $ fPutStr outFile (closureHelper opts)
 
   for_ indexedFuncs (\c => do

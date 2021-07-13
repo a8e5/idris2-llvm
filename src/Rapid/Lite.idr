@@ -4,6 +4,7 @@ import Data.List
 import Data.String
 import System
 import System.File
+import System.Info
 
 import Compiler.VMCode
 import Core.CompileExpr
@@ -70,6 +71,6 @@ main = do
     else do
       pure allFunctions
 
-  let opts = MkCompileOpts debug False Statepoint
+  let opts = MkCompileOpts debug False Statepoint os
 
   writeIR optimizedFunctions support (filename ++ ".output.ll") opts
