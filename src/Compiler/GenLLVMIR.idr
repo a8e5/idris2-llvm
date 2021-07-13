@@ -3248,7 +3248,7 @@ foreignRedirectMap = [
   , ("scheme:blodwen-string-iterator-next", "prim/blodwen-string-iterator-next")
   , ("scheme:blodwen-string-iterator-to-string", "prim/blodwen-string-iterator-to-string")
   , ("C:exit, libc 6", "rapid_system_exit")
-  , ("C:system, libc 6", "rapid_system_system")
+  , ("C:idris2_system, libidris2_support, idris_system.h", "rapid_system_system")
   , ("C:getenv, libc 6", "rapid_system_get_env")
   , ("scheme:blodwen-arg-count", "rapid_system_get_arg_count")
   , ("scheme:blodwen-arg", "rapid_system_get_arg")
