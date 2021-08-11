@@ -94,6 +94,24 @@ int64_t rapid_system_errno(Idris_TSO *base, ObjPtr _world) {
   return base->rapid_errno;
 }
 
+ObjPtr rapid_system_strerror(Idris_TSO *base, int64_t errnum, ObjPtr _world) {
+  const size_t MAX_STRERROR_LENGTH = 2048;
+  char buf[MAX_STRERROR_LENGTH];
+
+  strerror_r(errnum, buf, MAX_STRERROR_LENGTH);
+  // strerror_r will return non-zero in case of a too small buffer, but we
+  // ignore that and accept the truncated message. In any case the result is
+  // guaranteed to be NUL-terminated.
+
+  size_t value_len = strlen(buf);
+
+  ObjPtr newStr = (ObjPtr)rapid_C_allocate(base, HEADER_SIZE + value_len);
+  newStr->hdr = MAKE_HEADER(OBJ_TYPE_STRING, value_len);
+  memcpy(OBJ_PAYLOAD(newStr), buf, value_len);
+
+  return newStr;
+}
+
 int64_t rapid_system_file_errno(Idris_TSO *base, ObjPtr _world) {
   int64_t errno_raw = rapid_system_errno(base, _world);
   switch(errno_raw) {

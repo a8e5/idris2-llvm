@@ -3238,6 +3238,7 @@ foreignRedirectMap = [
   , ("C:idris2_isNull, libidris2_support, idris_support.h", "prim/isNull")
   , ("C:idris2_fileErrno, libidris2_suppor, idris_support.h", "rapid_system_file_errno")
   , ("C:idrnet_errno, libidris2_support, idris_net.h", "rapid_system_errno")
+  , ("C:idris2_strerror, libidris2_support, idris_support.h", "rapid_system_strerror")
   , ("C:idris2_getString, libidris2_support, idris_support.h", "prim/getString")
   , ("C:strlen,libc 6", "rapid_string_bytelength") -- <= remove, when Idris2 PR #1261 is merged
 

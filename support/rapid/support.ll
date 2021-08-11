@@ -55,6 +55,7 @@ declare ccc void @rapid_strreverse(%i8p1 noalias nocapture nofree nonnull writeo
 
 declare ccc void @rapid_system_exit(%TSOPtr, i64, %ObjPtr)
 declare ccc i64 @rapid_system_errno(%TSOPtr, %ObjPtr)
+declare ccc %ObjPtr @rapid_system_strerror(%TSOPtr, i64, %ObjPtr)
 declare ccc i64 @rapid_system_file_errno(%TSOPtr, %ObjPtr)
 declare ccc i64 @rapid_system_system(%TSOPtr, %ObjPtr, %ObjPtr)
 declare ccc %ObjPtr @rapid_system_fork(%TSOPtr, %ObjPtr, %ObjPtr)
