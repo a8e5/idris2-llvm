@@ -25,6 +25,7 @@ environment:
 
 tasks:
   - install-prerequisites: |
+      sudo pip3 install setuptools wheel
       sudo pip3 install lit
 
   - load-prebuilt-idris2: |
