@@ -848,7 +848,7 @@ makeCaseLabel {conNames} caseId (Right n,_) =
                      pure "error"
 
 instrAsComment : VMInst -> String
-instrAsComment i = ";" ++ (unwords $ forget $ lines $ show i)
+instrAsComment i = ";" ++ (unwords $ lines $ show i)
 
 prepareArgCallConv' : List String -> List String
 prepareArgCallConv' rest = ["%RuntimePtr %HpArg", "%TSOPtr %BaseArg", "%RuntimePtr %HpLimArg"] ++ rest
