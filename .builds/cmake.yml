@@ -4,7 +4,6 @@ secrets:
   - 847f7bd1-cee2-48a9-93d9-8ebef49c6984
 
 sources:
-  - https://git.sr.ht/~cypheon/Idris2#rapid
   - git@git.sr.ht:~cypheon/rapid
 
 repositories:
@@ -29,8 +28,7 @@ tasks:
       sudo pip3 install lit
 
   - load-prebuilt-idris2: |
-      cd Idris2
-      idris2_commit=$(git show-ref --hash --head refs/HEAD)
+      idris2_commit=$(git ls-remote 'https://git.sr.ht/~cypheon/Idris2' refs/heads/rapid | awk '{print $1}')
       curl -LsSf -o /tmp/idris2_prebuilt.tar.gz "https://neo.sinyax.net/cdn/artifacts/idris2_debian_${idris2_commit}.tar.gz"
       cd $HOME
       tar xzvf /tmp/idris2_prebuilt.tar.gz
