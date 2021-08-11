@@ -141,6 +141,7 @@ ToSexp (PrimFn arity) where
 
   toSexp DoubleExp     = SList [SAtom "DoubleExp"]
   toSexp DoubleLog     = SList [SAtom "DoubleLog"]
+  toSexp DoublePow     = SList [SAtom "DoublePow"]
   toSexp DoubleSin     = SList [SAtom "DoubleSin"]
   toSexp DoubleCos     = SList [SAtom "DoubleCos"]
   toSexp DoubleTan     = SList [SAtom "DoubleTan"]
@@ -201,6 +202,8 @@ FromSexp (PrimFn 2) where
   fromSexp (SList [SAtom "StrIndex"])   = pure $ StrIndex
   fromSexp (SList [SAtom "StrCons"])    = pure $ StrCons
   fromSexp (SList [SAtom "StrAppend"])  = pure $ StrAppend
+
+  fromSexp (SList [SAtom "DoublePow"])     = pure $ DoublePow
 
   fromSexp (SList [SAtom "Crash"])      = pure $ Crash
 
