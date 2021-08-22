@@ -287,6 +287,12 @@ void idris_rts_gc(Idris_TSO *base, uint8_t *sp) {
 #ifdef RAPID_GC_DEBUG_ENABLED
     fprintf(stderr, "\nnursery will grow next GC: %llu -> %llu\n", nextNurserySize, base->next_nursery_size);
 #endif
+  } else if (nurseryUsed < (base->next_nursery_size >> 2)
+      && (base->next_nursery_size >= 2*INITIAL_NURSERY_SIZE)) {
+    base->next_nursery_size = base->next_nursery_size / 2;
+#ifdef RAPID_GC_DEBUG_ENABLED
+    fprintf(stderr, "\nnursery will shrink next GC: %llu(used) / %llu -> %llu\n", nurseryUsed, nextNurserySize, base->next_nursery_size);
+#endif
   }
 
   if (rapid_global_config->debug_heap_write_poison) {
