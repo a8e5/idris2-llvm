@@ -14,9 +14,6 @@
 #include "object.h"
 #include "rts.h"
 
-/*const size_t INITIAL_NURSERY_SIZE = 128;*/
-const size_t INITIAL_NURSERY_SIZE = 64 * 1024 * 1024;
-
 static const size_t RAPID_STACK_SIZE = 128 * 1024 * 1024;
 
 extern int64_t idris_enter(Idris_TSO *baseTSO);
