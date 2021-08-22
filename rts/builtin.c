@@ -171,6 +171,15 @@ void rapid_system_pclose(Idris_TSO *base, ObjPtr filePtrObj, ObjPtr _world) {
   pclose(f);
 }
 
+void rapid_system_free(Idris_TSO *base, ObjPtr ptrObj, ObjPtr _world) {
+  if (OBJ_TYPE(ptrObj) != OBJ_TYPE_OPAQUE || OBJ_SIZE(ptrObj) != POINTER_SIZE) {
+    rapid_C_crash("invalid object passed to rapid_system_free");
+  }
+
+  void *p = *(void **)OBJ_PAYLOAD(ptrObj);
+  free(p);
+}
+
 
 // return type: Ptr String
 ObjPtr rapid_system_get_env(Idris_TSO *base, ObjPtr varObj, ObjPtr _world) {
