@@ -30,7 +30,7 @@ build:
 	-mkdir -p $@
 
 %.bc: %.c $(RTS_HEADERS) Makefile
-	clang -flto -g -O3 -c -Wall -Wpedantic -Werror $(CFLAGS) -std=c11 -o $@ $<
+	clang -flto -g -O3 -c -Wall -Wpedantic -Werror -Wno-error=format $(CFLAGS) -std=c11 -o $@ $<
 
 arch.o: arch_x86-64.s
 	clang -c -o $@ $<

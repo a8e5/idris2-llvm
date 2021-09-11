@@ -28,7 +28,7 @@ foreach(C_SOURCE ${RTS_SOURCES} "entry.c")
   string(REGEX REPLACE "\.c$" ".bc" BC_TARGET ${C_SOURCE})
   add_custom_command(
     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${BC_TARGET}"
-    COMMAND clang ARGS "-flto" "-g" "-O3" "-c" "-Wall" "-Wpedantic" "-Werror"
+    COMMAND clang ARGS "-flto" "-g" "-O3" "-c" "-Wall" "-Wpedantic" "-Werror" "-Wno-error=format"
     ${CFLAGS} "-std=c11" "-o" "${CMAKE_CURRENT_BINARY_DIR}/${BC_TARGET}" "${CMAKE_CURRENT_SOURCE_DIR}/${C_SOURCE}"
     DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${C_SOURCE}"
     )
