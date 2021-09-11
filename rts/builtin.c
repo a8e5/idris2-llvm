@@ -94,8 +94,8 @@ int64_t rapid_system_errno(Idris_TSO *base, ObjPtr _world) {
   return base->rapid_errno;
 }
 
+#define MAX_STRERROR_LENGTH 2048
 ObjPtr rapid_system_strerror(Idris_TSO *base, int64_t errnum, ObjPtr _world) {
-  const size_t MAX_STRERROR_LENGTH = 2048;
   char buf[MAX_STRERROR_LENGTH];
 
   strerror_r(errnum, buf, MAX_STRERROR_LENGTH);
