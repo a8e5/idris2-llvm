@@ -12,6 +12,7 @@ repositories:
 packages:
   - chezscheme
   - cmake
+  - libgc-dev
   - libgmp-dev
   - ninja-build
   - python3-pip
