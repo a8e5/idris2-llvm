@@ -61,3 +61,32 @@ add_custom_command(
 add_custom_target(rapid_rts
   DEPENDS "${RAPID_RTS_LIB}" "${RAPID_PLATFORM_LIB}"
   )
+
+#######
+# tests
+#######
+
+add_executable(rapid_rts_test
+  test/test_main.c
+  ${RTS_SOURCES}
+  )
+target_compile_options(rapid_rts_test PUBLIC ${RTS_CFLAGS})
+target_include_directories(rapid_rts_test PUBLIC ${RTS_INCLUDES})
+target_link_directories(rapid_rts_test PUBLIC
+  "/usr/local/lib"
+  )
+target_link_libraries(rapid_rts_test PUBLIC
+  gmp
+  gc
+  "${RAPID_PLATFORM_LIB}"
+  )
+
+add_custom_target(rapid_test_rts
+                  COMMAND rapid_rts_test
+                  WORKING_DIRECTORY .
+                  DEPENDS rapid_rts_test)
+
+if (NOT TARGET test)
+  add_custom_target(test)
+endif()
+add_dependencies(test rapid_test_rts)

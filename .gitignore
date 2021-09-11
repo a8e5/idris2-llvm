@@ -3,6 +3,7 @@
 /docs/build/
 /rapid
 /rts/build/
+/rts/rapid_rts_test
 /samples/build/
 /src/build/
 /tests/**/build/
