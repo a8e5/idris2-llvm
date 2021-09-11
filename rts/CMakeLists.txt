@@ -24,11 +24,11 @@ else()
   list(APPEND CFLAGS "-D_GNU_SOURCE")
 endif()
 
-foreach(C_SOURCE ${RTS_SOURCES})
+foreach(C_SOURCE ${RTS_SOURCES} "entry.c")
   string(REGEX REPLACE "\.c$" ".bc" BC_TARGET ${C_SOURCE})
   add_custom_command(
     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${BC_TARGET}"
-    COMMAND clang ARGS "-flto" "-g" "-O3" "-c" "-Wall" "-Wpedantic" "-Werror" "-Wno-format"
+    COMMAND clang ARGS "-flto" "-g" "-O3" "-c" "-Wall" "-Wpedantic" "-Werror"
     ${CFLAGS} "-std=c11" "-o" "${CMAKE_CURRENT_BINARY_DIR}/${BC_TARGET}" "${CMAKE_CURRENT_SOURCE_DIR}/${C_SOURCE}"
     DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${C_SOURCE}"
     )

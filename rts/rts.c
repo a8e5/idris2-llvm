@@ -64,7 +64,7 @@ void rapid_rts_init() {
   rapid_global_config->debug_heap_write_poison = false;
 }
 
-int main(int argc, char **argv) {
+int rts_main(int argc, char **argv) {
   rapid_rts_init();
   rapid_gc_init();
   rapid_builtin_init(argc, argv);
