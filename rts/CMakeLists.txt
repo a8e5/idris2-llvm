@@ -76,8 +76,9 @@ target_link_directories(rapid_rts_test PUBLIC
   "/usr/local/lib"
   )
 target_link_libraries(rapid_rts_test PUBLIC
-  gmp
   gc
+  gmp
+  m
   "${RAPID_PLATFORM_LIB}"
   )
 
