@@ -11,7 +11,7 @@
 /*#define RAPID_GC_STATS_ENABLED*/
 
 /*const size_t INITIAL_NURSERY_SIZE = 128;*/
-static const size_t INITIAL_NURSERY_SIZE = 64 * 1024 * 1024;
+static const size_t INITIAL_NURSERY_SIZE = 2 * 1024 * 1024;
 
 void rapid_gc_init();
 void rapid_gc_setup_heap(Idris_TSO *base);

@@ -11,6 +11,10 @@ int64_t idris_enter(Idris_TSO *baseTSO) {
   return 0;
 }
 
+int test_memory();
+
 int main(int argc, char **argv) {
-  return 0;
+  int err = 0;
+  err |= test_memory();
+  return err;
 }

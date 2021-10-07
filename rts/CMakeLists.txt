@@ -2,6 +2,7 @@ set(RTS_SOURCES
   builtin.c
   gc.c
   getline.c
+  memory.c
   net.c
   object.c
   rts.c
