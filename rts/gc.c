@@ -64,7 +64,7 @@ ObjPtr alloc_during_gc(Idris_TSO *base, uint32_t size) {
   return (ObjPtr)p;
 }
 
-ObjPtr copy(Idris_TSO *base, ObjPtr p) {
+ObjPtr evacuate(Idris_TSO *base, ObjPtr p) {
   ObjPtr new;
   uint32_t size;
 
@@ -107,66 +107,69 @@ ObjPtr copy(Idris_TSO *base, ObjPtr p) {
   }
 }
 
+static inline void scavenge(Idris_TSO *base, ObjPtr obj) {
+#ifdef RAPID_GC_DEBUG_ENABLED
+  fprintf(stderr, "================================== scavenge obj start\n");
+  dump_obj(obj);
+  fprintf(stderr, "================================== scavenge obj start\n");
+#endif
+  assert(!OBJ_IS_INLINE(obj));
+  switch(OBJ_TYPE(obj)) {
+    case OBJ_TYPE_CLOSURE:
+      {
+        int argCount = 0xffff & obj->hdr;
+        for (int i = 0; i < argCount; ++i) {
+          ObjPtr value = OBJ_GET_SLOT(obj, i + 1);
+          ObjPtr argCopy = evacuate(base, value);
+          OBJ_PUT_SLOT(obj, i + 1, argCopy);
+        }
+      }
+      break;
+    case OBJ_TYPE_CON_NO_ARGS:
+      {
+        int argCount = obj->hdr >> 40;
+        for (int i = 0; i < argCount; ++i) {
+          ObjPtr value = OBJ_GET_SLOT(obj, i);
+          ObjPtr argCopy = evacuate(base, value);
+          OBJ_PUT_SLOT(obj, i, argCopy);
+        }
+      }
+      break;
+    case OBJ_TYPE_IOREF:
+      {
+        ObjPtr argCopy = evacuate(base, OBJ_GET_SLOT(obj, 0));
+        OBJ_PUT_SLOT(obj, 0, argCopy);
+      }
+      break;
+    case OBJ_TYPE_IOARRAY:
+      {
+        int arraySize = OBJ_SIZE(obj);
+        for (int i = 0; i < arraySize; ++i) {
+          ObjPtr value = OBJ_GET_SLOT(obj, i);
+          ObjPtr valCopy = evacuate(base, value);
+          OBJ_PUT_SLOT(obj, i, valCopy);
+        }
+      }
+      break;
+    case OBJ_TYPE_FWD_REF:
+      rapid_C_crash("illegal forward ref found");
+      break;
+    default:
+      break;
+  }
+#ifdef RAPID_GC_DEBUG_ENABLED
+  fprintf(stderr, "================================== scavenge obj end\n");
+  dump_obj(obj);
+  fprintf(stderr, "================================== scavenge obj end\n");
+#endif
+}
+
 static void cheney(Idris_TSO *base) {
   uint8_t *scan = base->nurseryStart;
 
   while(scan < base->nurseryNext) {
-    ObjPtr obj = (ObjPtr)scan;
-#ifdef RAPID_GC_DEBUG_ENABLED
-    fprintf(stderr, "================================== cheney obj start\n");
-    dump_obj(obj);
-    fprintf(stderr, "================================== cheney obj start\n");
-#endif
-    assert(!OBJ_IS_INLINE(obj));
-    switch(OBJ_TYPE(obj)) {
-      case OBJ_TYPE_CLOSURE:
-        {
-          int argCount = 0xffff & obj->hdr;
-          for (int i = 0; i < argCount; ++i) {
-            ObjPtr value = OBJ_GET_SLOT(obj, i + 1);
-            ObjPtr argCopy = copy(base, value);
-            OBJ_PUT_SLOT(obj, i + 1, argCopy);
-          }
-        }
-        break;
-      case OBJ_TYPE_CON_NO_ARGS:
-        {
-          int argCount = obj->hdr >> 40;
-          for (int i = 0; i < argCount; ++i) {
-            ObjPtr value = OBJ_GET_SLOT(obj, i);
-            ObjPtr argCopy = copy(base, value);
-            OBJ_PUT_SLOT(obj, i, argCopy);
-          }
-        }
-        break;
-      case OBJ_TYPE_IOREF:
-        {
-          ObjPtr argCopy = copy(base, OBJ_GET_SLOT(obj, 0));
-          OBJ_PUT_SLOT(obj, 0, argCopy);
-        }
-        break;
-      case OBJ_TYPE_IOARRAY:
-        {
-          int arraySize = OBJ_SIZE(obj);
-          for (int i = 0; i < arraySize; ++i) {
-            ObjPtr value = OBJ_GET_SLOT(obj, i);
-            ObjPtr valCopy = copy(base, value);
-            OBJ_PUT_SLOT(obj, i, valCopy);
-          }
-        }
-        break;
-      case OBJ_TYPE_FWD_REF:
-        rapid_C_crash("illegal forward ref found");
-        break;
-      default:
-        break;
-    }
-#ifdef RAPID_GC_DEBUG_ENABLED
-    fprintf(stderr, "================================== cheney obj end\n");
-    dump_obj(obj);
-    fprintf(stderr, "================================== cheney obj end\n");
-#endif
-    scan += aligned(OBJ_TOTAL_SIZE(obj));
+    scavenge(base, (ObjPtr)scan);
+    scan += aligned(OBJ_TOTAL_SIZE((ObjPtr)scan));
   }
 }
 
@@ -246,9 +249,9 @@ void idris_rts_gc(Idris_TSO *base, uint8_t *sp) {
       dump_obj(*stackSlot);
 #endif
 
-      ObjPtr copied = copy(base, *stackSlot);
+      ObjPtr copied = evacuate(base, *stackSlot);
 #ifdef RAPID_GC_DEBUG_ENABLED
-      fprintf(stderr, "::copy: %p -> %p\n", (void *)*stackSlot, (void *)copied);
+      fprintf(stderr, "::evacuate: %p -> %p\n", (void *)*stackSlot, (void *)copied);
       dump_obj(copied);
 #endif
       *stackSlot = copied;
