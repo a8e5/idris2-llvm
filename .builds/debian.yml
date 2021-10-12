@@ -7,7 +7,7 @@ sources:
   - git@git.sr.ht:~cypheon/rapid
 
 repositories:
-  llvm-10: http://apt.llvm.org/buster/ llvm-toolchain-buster-10 main 15CF4D18AF4F7421
+  llvm-11: http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-11 main 15CF4D18AF4F7421
 
 packages:
   - chezscheme
@@ -15,12 +15,12 @@ packages:
   - libgc-dev
   - libgmp-dev
   - python3-pip
-  # From LLVM-10 repository:
-  - clang-10
-  - llvm-10-dev
+  # From LLVM-11 repository:
+  - clang-11
+  - llvm-11-dev
 
 environment:
-  PATH: /home/build/.idris2/bin:/usr/lib/llvm-10/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games
+  PATH: /home/build/.idris2/bin:/usr/lib/llvm-11/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games
 
 tasks:
   - install-prerequisites: |
