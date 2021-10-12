@@ -14,5 +14,6 @@
 static const size_t INITIAL_NURSERY_SIZE = 64 * 1024 * 1024;
 
 void rapid_gc_init();
+void rapid_gc_setup_heap(Idris_TSO *base);
 void rapid_gc_finalize_stats(Idris_TSO *base);
 void *rapid_C_allocate(Idris_TSO *base, int32_t size);

@@ -343,6 +343,14 @@ rapid_gc_finalize_stats(Idris_TSO *base) {
   base->gc_stats.allocated_bytes_total += current_heap_used;
 }
 
+void rapid_gc_setup_heap(Idris_TSO *base) {
+  base->nurseryStart = (uint8_t *)malloc(INITIAL_NURSERY_SIZE);
+  base->nurseryNext = base->nurseryStart;
+  base->nurseryEnd = (uint8_t *)((long int)base->nurseryStart + INITIAL_NURSERY_SIZE);
+  base->next_nursery_size = INITIAL_NURSERY_SIZE;
+  base->heap_aux = NULL;
+}
+
 void rapid_gc_init() {
   if (rapid_gc_flavour == GC_FLAVOUR_STATEPOINT) {
     void *STACKMAP = get_stackmap();

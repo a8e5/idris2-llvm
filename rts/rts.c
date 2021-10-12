@@ -70,11 +70,7 @@ int rts_main(int argc, char **argv) {
   rapid_builtin_init(argc, argv);
 
   Idris_TSO *tso = malloc(sizeof(Idris_TSO));
-  tso->nurseryStart = (uint8_t *)malloc(INITIAL_NURSERY_SIZE);
-  tso->nurseryNext = tso->nurseryStart;
-  tso->nurseryEnd = (uint8_t *)((long int)tso->nurseryStart + INITIAL_NURSERY_SIZE);
-  tso->next_nursery_size = INITIAL_NURSERY_SIZE;
-  tso->heap_aux = NULL;
+  rapid_gc_setup_heap(tso);
   tso->rapid_errno = 1;
 
   tso->stack_size = RAPID_STACK_SIZE;
