@@ -7,41 +7,24 @@
  * can be found in LICENSES/LicenseRef-BSD-3-Clause-GHC.txt
  */
 
+#include "memory.h"
+
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <pthread.h>
 
-#define BLOCK_SHIFT 12
-#define BLOCK_SIZE (uint64_t)(1 << BLOCK_SHIFT)
-
-#define ROUND_UP(x, size) ((((uint64_t)(x) + (size) - 1) / (size)) * (size))
-#define BLOCK_ROUND_UP(x) (ROUND_UP(x, BLOCK_SIZE))
-
-#define CLUSTER_SHIFT 20
-#define CLUSTER_SIZE (1 << CLUSTER_SHIFT)
-const unsigned long CLUSTER_BLOCK_MASK = CLUSTER_SIZE - 1;
-const unsigned long CLUSTER_CLUSTER_MASK = ~CLUSTER_BLOCK_MASK;
-#define CLUSTER_ROUND_UP(x) (ROUND_UP(x, CLUSTER_SIZE))
-
-#define BLOCKDESCR_SIZE 0x40
-#define CLUSTER_FIRST_BLOCK_OFFSET (BLOCK_ROUND_UP(BLOCKDESCR_SIZE * (CLUSTER_SIZE/BLOCK_SIZE)))
-#define CLUSTER_FIRST_BLOCK_INDEX (CLUSTER_FIRST_BLOCK_OFFSET / BLOCK_SIZE)
-// max. number of blocks in one cluster (taking offset into account)
-#define CLUSTER_MAX_BLOCKS ((CLUSTER_SIZE / BLOCK_SIZE) - CLUSTER_FIRST_BLOCK_INDEX)
+#include "vendor/hashset.h"
 
 static_assert(CLUSTER_FIRST_BLOCK_OFFSET == 16384, "verify expected first block offset");
 
-void *alloc_clusters(size_t count);
-void free_clusters(void *p);
-bool is_heap_alloc(void *p);
-
-void add_to_freelist(void *start);
-void *take_from_freelist(size_t num_blocks);
+static void add_to_freelist(void *start);
+static void *take_from_freelist(size_t num_blocks);
 
 #define NUM_GENERATIONS 3
 
@@ -57,34 +40,6 @@ void CRASH(const char *msg) {
 #define SIZECLASS_MAX 11
 
 #define LARGE_OBJECT_THRESHOLD (1 << SIZECLASS_MAX)
-
-struct cellblock_info {
-  // this block stores objects up to size 2^sizeclass
-  uint8_t sizeclass;
-  // *index* of the first free cell, the cell contains the index and number of
-  // the next free cell.
-  uint16_t free_cell;
-};
-
-struct free_cell_info {
-  uint16_t next;
-  uint16_t length;
-};
-
-// block descriptor
-struct block_descr {
-  /// pointer to this block's memory
-  void *start;
-  /// `NULL` if this block is in the free list, otherwise pointer to the first
-  /// free byte
-  void *free;
-  size_t num_blocks;
-  struct cellblock_info cellinfo; // only for cell-blocks
-  void *pending; // only needed during GC
-  struct block_descr *link;
-  void *other3;
-  void *other4;
-};
 
 static_assert(sizeof(struct block_descr) == BLOCKDESCR_SIZE, "block_descr struct is too large");
 
@@ -108,21 +63,18 @@ struct rapid_memory {
    * block groups of 128 - 255 blocks.
    */
   struct block_descr *free_list[NUM_FREE_LISTS];
+
+  hashset_t all_clusters;
 };
 
 static struct rapid_memory rapid_mem;
-
-static inline struct block_descr *get_block_descr(void *X) {
-  uint64_t cluster_start = (uint64_t)(X) & CLUSTER_CLUSTER_MASK;
-  uint64_t block_number_in_cluster = ((uint64_t)(X) & CLUSTER_BLOCK_MASK) / BLOCK_SIZE;
-  uint64_t block_descr_addr = cluster_start | (block_number_in_cluster * BLOCKDESCR_SIZE);
-  return (struct block_descr *)block_descr_addr;
-}
 
 static pthread_mutex_t rapid_memory_mutex;
 
 void rapid_memory_init() {
   pthread_mutex_init(&rapid_memory_mutex, NULL);
+
+  rapid_mem.all_clusters = hashset_create();
 }
 
 
@@ -134,7 +86,21 @@ void *alloc_clusters(size_t count) {
     CRASH("memory allocation failed");
   }
 
+  hashset_add(rapid_mem.all_clusters, mem);
+
   return mem;
+}
+
+
+/**
+ * Find out if a given memory address is managed by this memory manager
+ *
+ * Iff is_heap_alloc(X) returns `true`, it is safe to dereference the result of
+ * the call `get_block_descr(X)`
+ */
+bool is_heap_alloc(void *addr) {
+  uint64_t cluster_start = (uint64_t)(addr) & CLUSTER_CLUSTER_MASK;
+  return hashset_is_member(rapid_mem.all_clusters, (void *)cluster_start);
 }
 
 /*
@@ -153,16 +119,16 @@ static inline size_t log2i(size_t n) {
   return __builtin_clzll(n) ^ (sizeof(size_t)*8 - 1);
 }
 
-static inline void *block_group_end(struct block_descr *bdesc) {
-  return (char *)bdesc->start + (bdesc->num_blocks * BLOCK_SIZE);
-}
-
 void init_block_group(void *start, size_t num_blocks) {
   struct block_descr *bdesc = get_block_descr(start);
   *bdesc = (struct block_descr){ 0, };
   bdesc->start = start;
   bdesc->free = start;
   bdesc->num_blocks = num_blocks;
+
+  // TODO: this is inefficient, we can probably just zero memory in
+  // alloc_block_group right before returning it
+  memset(bdesc->start, 0, bdesc->num_blocks * BLOCK_SIZE);
 }
 
 /**
@@ -171,40 +137,51 @@ void init_block_group(void *start, size_t num_blocks) {
  *
  * @returns the value of param `start`
  */
-void *split_block_group(void *start, size_t num_blocks) {
+static void *split_block_group(void *start, size_t num_blocks) {
   struct block_descr *head = get_block_descr(start);
   assert(num_blocks < head->num_blocks);
 
   size_t tail_num_blocks = head->num_blocks - num_blocks;
   head->num_blocks = num_blocks;
-  void *tail_start = block_group_end(head);
+  void *tail_start = block_group_get_end(head);
   init_block_group(tail_start, tail_num_blocks);
   add_to_freelist(tail_start);
 
   return start;
 }
 
-void add_to_freelist(void *start) {
+static void add_to_freelist(void *start) {
   // TODO: coalesce adjacent empty block groups
   struct block_descr *bdesc = get_block_descr(start);
   assert(bdesc->free);
   bdesc->free = NULL;
   size_t free_list_index = log2i(bdesc->num_blocks);
+  assert(free_list_index < NUM_FREE_LISTS);
   struct block_descr *old_head = rapid_mem.free_list[free_list_index];
   rapid_mem.free_list[free_list_index] = bdesc;
   bdesc->link = old_head;
 }
+
+void free_block_group(void *start) {
+  struct block_descr *bdesc = get_block_descr(start);
+  assert(bdesc->free);
+  assert(bdesc->num_blocks);
+  // TODO: is there something else, that needs to be done?
+  add_to_freelist(start);
+}
+
+#define MAX_FREELIST_TRIES 16
 
 /**
  * Try to fetch a block group from the free list
  *
  * May return `NULL` if the freelist contains no suitable block group
  */
-void *take_from_freelist(size_t num_blocks) {
-  // we look in the bin that is one "larger" than our target group size,
-  // because that guarantees that any match will fit:
+static void *take_from_freelist(size_t num_blocks) {
+  // we first look in the bin that is one size class "larger" than our target
+  // group size, because that guarantees that any match will fit:
   size_t num_log2 = log2i(num_blocks) + 1;
-  // TODO: improve efficency by looking in other bins as well
+
   if (num_log2 < NUM_FREE_LISTS && rapid_mem.free_list[num_log2]) {
     struct block_descr *bdesc = rapid_mem.free_list[num_log2];
     assert(bdesc->free == 0);
@@ -215,14 +192,42 @@ void *take_from_freelist(size_t num_blocks) {
     return split_block_group(bdesc->start, num_blocks);
   }
 
+  if (num_log2 == 0) {
+    return NULL;
+  }
+
+  num_log2 = num_log2 - 1;
+  if (num_log2 < NUM_FREE_LISTS && rapid_mem.free_list[num_log2]) {
+    struct block_descr **prev = &rapid_mem.free_list[num_log2];
+    struct block_descr *bdesc = rapid_mem.free_list[num_log2];
+    for(size_t i=0; i<MAX_FREELIST_TRIES && bdesc; bdesc=bdesc->link, ++i) {
+      assert(bdesc->free == 0);
+      if (bdesc->num_blocks >= num_blocks) {
+        *prev = bdesc->link;
+        assert(bdesc->link == 0 || bdesc->link->free == 0);
+
+        if (bdesc->num_blocks > num_blocks) {
+          return split_block_group(bdesc->start, num_blocks);
+        } else {
+          assert(bdesc->num_blocks == num_blocks);
+          return bdesc->start;
+        }
+      }
+      prev = &bdesc->link;
+    }
+
+  }
+
+
   return NULL;
 }
 
 void *alloc_block_group(size_t num_blocks) {
-  assert(num_blocks < CLUSTER_MAX_BLOCKS && "big groups not yet implemented");
+  assert(num_blocks <= CLUSTER_MAX_BLOCKS && "big groups not yet implemented");
 
   void *start = take_from_freelist(num_blocks);
   if (start) {
+    init_block_group(start, num_blocks);
     return start;
   }
 
@@ -246,6 +251,8 @@ void write_pattern(void *start, size_t size) {
   }
 }
 
+static size_t test_big_static_array[4096];
+
 int test_memory() {
   rapid_memory_init();
 
@@ -267,12 +274,26 @@ int test_memory() {
   assert(log2i(8) == 3);
   assert(log2i(CLUSTER_MAX_BLOCKS) == NUM_FREE_LISTS - 1);
 
+  void *allocations[CLUSTER_MAX_BLOCKS];
   for (size_t i = 1; i < CLUSTER_MAX_BLOCKS; ++i) {
     void *mymem = alloc_block_group(i);
     assert(mymem);
     assert(mymem == get_block_descr(mymem)->start);
+    assert(is_heap_alloc(mymem));
     write_pattern(mymem, i * BLOCK_SIZE);
+    allocations[i] = mymem;
   }
+
+  for (size_t i = 1; i < CLUSTER_MAX_BLOCKS; ++i) {
+    free_block_group(allocations[i]);
+    allocations[i] = NULL;
+  }
+
+  // check some non-heap objects
+  assert(!is_heap_alloc((void *)test_memory));
+  assert(!is_heap_alloc(&rapid_mem));
+  assert(!is_heap_alloc(test_big_static_array));
+  assert(!is_heap_alloc(test_big_static_array + 512));
 
   return 0;
 }

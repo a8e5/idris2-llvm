@@ -1,6 +1,7 @@
 #include <llvm-statepoint-tablegen.h>
 
 #include "gc.h"
+#include "memory.h"
 #include "object.h"
 #include "rts.h"
 
@@ -56,12 +57,25 @@ static inline ObjPtr *get_stack_slot(uint8_t *sp, uint8_t *bp, pointer_slot_t sl
   }
 }
 
-ObjPtr alloc_during_gc(Idris_TSO *base, uint32_t size) {
-  uint8_t *p = base->nurseryNext;
-  assert(((uint64_t)base->nurseryNext & 0x07) == 0);
-  base->nurseryNext += aligned(size);
-  assert((uint64_t)base->nurseryNext <= (uint64_t)base->nurseryEnd);
-  return (ObjPtr)p;
+/**
+ * Allocate directly from the nursery
+ */
+static inline ObjPtr alloc_during_gc(Idris_TSO *base, uint32_t size) {
+  uint8_t *p = base->nurseryCur->free;
+  assert(((uint64_t)p & 0x07) == 0);
+  assert(base->nurseryCur->start <= base->nurseryCur->free);
+  assert(base->nurseryCur->free <= block_group_get_end(base->nurseryCur));
+  assert(size <= BLOCK_SIZE && "big objects not yet supported");
+  if (p + aligned(size) <= (uint8_t *)block_group_get_end(base->nurseryCur)) {
+    base->nurseryCur->free = p + aligned(size);
+    return (ObjPtr)p;
+  } else {
+    assert(base->nurseryCur->link);
+    base->nurseryCur = base->nurseryCur->link;
+    p = base->nurseryCur->free;
+    base->nurseryCur->free = p + aligned(size);
+    return (ObjPtr)p;
+  }
 }
 
 ObjPtr evacuate(Idris_TSO *base, ObjPtr p) {
@@ -80,12 +94,10 @@ ObjPtr evacuate(Idris_TSO *base, ObjPtr p) {
     return (ObjPtr)fwd_target;
   }
 
-  // TODO: replace this with more efficient pointer tagging
-  if ( !(((uint64_t)p >= (uint64_t)base->heap_aux) && ((uint64_t)p < (uint64_t)base->heap_aux_end)) ) {
-    // object is not inside the old nursery, keep it where it is
+  // TODO: replace this with more efficient solution
+  if (!is_heap_alloc(p)) {
     return p;
   }
-  assert(((uint64_t)p >= (uint64_t)base->heap_aux) && ((uint64_t)p < (uint64_t)base->heap_aux_end) && "object is not inside old nursery");
 
   size = OBJ_TOTAL_SIZE(p);
   new = alloc_during_gc(base, size);
@@ -104,6 +116,8 @@ static inline void scavenge(Idris_TSO *base, ObjPtr obj) {
   fprintf(stderr, "================================== scavenge obj start\n");
 #endif
   assert(!OBJ_IS_INLINE(obj));
+  assert(!OBJ_IS_FWD_INPLACE(obj));
+  assert(is_heap_alloc(obj));
   switch(OBJ_TYPE(obj)) {
     case OBJ_TYPE_CLOSURE:
       {
@@ -152,16 +166,46 @@ static inline void scavenge(Idris_TSO *base, ObjPtr obj) {
 }
 
 static void cheney(Idris_TSO *base) {
-  uint8_t *scan = base->nurseryStart;
+  struct block_descr *bdesc = base->nurseryHead;
+  while (bdesc && bdesc->free != bdesc->start) {
+    uint8_t *scan = bdesc->start;
+    while(scan < (uint8_t *)bdesc->free) {
+      scavenge(base, (ObjPtr)scan);
+      scan += aligned(OBJ_TOTAL_SIZE((ObjPtr)scan));
+    }
+    bdesc = bdesc->link;
+  }
+}
 
-  while(scan < base->nurseryNext) {
-    scavenge(base, (ObjPtr)scan);
-    scan += aligned(OBJ_TOTAL_SIZE((ObjPtr)scan));
+/**
+ * Allocate a chain of linked block groups of at least the requested size (up
+ * to CLUSTER_SIZE bytes more).
+ */
+static struct block_descr *gc_alloc_chain(size_t size) {
+  struct block_descr *head = NULL;
+  size_t allocated_size = 0;
+  do {
+    // TODO: allow smaller groups, to avoid fragmentation
+    void *mem = alloc_block_group(CLUSTER_MAX_BLOCKS);
+    struct block_descr *next_head = get_block_descr(mem);
+    next_head->link = head;
+    allocated_size += next_head->num_blocks * BLOCK_SIZE;
+    head = next_head;
+  } while (allocated_size < size);
+  return head;
+}
+
+static void gc_free_chain(struct block_descr *head) {
+  struct block_descr *bdesc = head;
+  while (bdesc) {
+    struct block_descr *next = bdesc->link;
+    free_block_group(bdesc->start);
+    bdesc = next;
   }
 }
 
 void idris_rts_gc(Idris_TSO *base, uint8_t *sp) {
-  uint8_t * orig_sp = sp;
+  /*uint8_t * orig_sp = sp;*/
 #ifdef RAPID_GC_DEBUG_ENABLED
   fprintf(stderr, "GC called for %llu bytes, stack pointer: %p\n", base->heap_alloc, (void *)sp);
 #endif
@@ -181,24 +225,14 @@ void idris_rts_gc(Idris_TSO *base, uint8_t *sp) {
   fprintf(stderr, "GC begin frame info: 0x%016llx\n", (uint64_t)frame);
 #endif
 
-  uint64_t oldNurserySize = (uint64_t)base->nurseryEnd - (uint64_t)base->nurseryStart;
   uint64_t nextNurserySize = base->next_nursery_size;
 
-  uint8_t *oldNursery = (uint8_t *)base->nurseryStart;
-  uint8_t *newNursery = realloc(base->heap_aux, nextNurserySize);
-  memset(newNursery, 0, nextNurserySize);
-  base->nurseryStart = newNursery;
-  base->nurseryNext = newNursery;
-  base->nurseryEnd = (uint8_t *) ((uint64_t)newNursery + nextNurserySize);
+  struct block_descr *nurseryOld = base->nurseryHead;
+  base->nurseryHead = base->nurseryCur = gc_alloc_chain(nextNurserySize);
 
 #ifdef RAPID_GC_DEBUG_ENABLED
-  fprintf(stderr, "nursery size: %llu -> %llu\n", oldNurserySize, nextNurserySize);
-  fprintf(stderr, "old nursery at: %p - %p\n", (void *)oldNursery, (void *)((uint64_t)oldNursery + oldNurserySize));
   fprintf(stderr, "new nursery at: %p - %p\n", (void *)newNursery, (void *)base->nurseryEnd);
 #endif
-
-  base->heap_aux = oldNursery;
-  base->heap_aux_end = oldNursery + oldNurserySize;
 
   while (frame != NULL) {
     uint8_t *bp = *(uint8_t **)fp;
@@ -271,6 +305,12 @@ void idris_rts_gc(Idris_TSO *base, uint8_t *sp) {
 
   cheney(base);
 
+  base->nurseryStart = base->nurseryCur->start;
+  base->nurseryNext = base->nurseryCur->free;
+  base->nurseryEnd = block_group_get_end(base->nurseryCur);
+
+  gc_free_chain(nurseryOld);
+
   uint64_t nurseryUsed = (uint64_t)base->nurseryNext - (uint64_t)base->nurseryStart;
   if (nurseryUsed > (base->next_nursery_size >> 1)) {
     base->next_nursery_size = base->next_nursery_size * 2;
@@ -286,9 +326,6 @@ void idris_rts_gc(Idris_TSO *base, uint8_t *sp) {
     base->next_nursery_size = nextNurserySize;
     base->nurseryEnd = (uint8_t *) ((uint64_t)base->nurseryStart + nextNurserySize);
 
-    // shrink the old heap allocation to potentially give back memory to the OS
-    base->heap_aux = realloc(base->heap_aux, base->next_nursery_size);
-
     // Not sure if the following would be safe, because realloc might move the memory.
     // TODO: Find out if realloc is allowed to move the region when it is
     // smaller than the original allocation:
@@ -296,10 +333,6 @@ void idris_rts_gc(Idris_TSO *base, uint8_t *sp) {
 #ifdef RAPID_GC_DEBUG_ENABLED
     fprintf(stderr, "\nnursery shrunk: %llu(used) / %llu -> %llu\n", nurseryUsed, 2*nextNurserySize, base->next_nursery_size);
 #endif
-  }
-
-  if (rapid_global_config->debug_heap_write_poison) {
-    memset(base->heap_aux, 0x5f, oldNurserySize);
   }
 
 #ifdef RAPID_GC_DEBUG_ENABLED
@@ -325,6 +358,7 @@ void idris_rts_gc(Idris_TSO *base, uint8_t *sp) {
   }
 #endif
 
+  /*
   // There's probably a more efficient way to do this, but this should be rare
   // enough, that it shouldn't matter too much.
   if ((uint64_t)base->nurseryNext + base->heap_alloc > (uint64_t)base->nurseryEnd) {
@@ -338,8 +372,26 @@ void idris_rts_gc(Idris_TSO *base, uint8_t *sp) {
 #endif
     idris_rts_gc(base, orig_sp);
   }
+  */
   assert((uint64_t)base->nurseryNext + base->heap_alloc <= (uint64_t)base->nurseryEnd);
   base->heap_alloc = 0;
+}
+
+void
+idris_rts_more_heap(Idris_TSO *base, uint8_t *sp) {
+  // fast path
+  if (base->nurseryCur->link) {
+    base->nurseryCur = base->nurseryCur->link;
+
+    base->nurseryStart = base->nurseryCur->start;
+    base->nurseryNext = base->nurseryCur->free;
+    assert(base->nurseryStart == base->nurseryNext);
+    base->nurseryEnd = block_group_get_end(base->nurseryCur);
+
+    assert(base->heap_alloc <= BLOCK_SIZE && "more heap does not support big objects");
+  } else {
+    idris_rts_gc(base, sp);
+  }
 }
 
 void
@@ -349,11 +401,13 @@ rapid_gc_finalize_stats(Idris_TSO *base) {
 }
 
 void rapid_gc_setup_heap(Idris_TSO *base) {
-  base->nurseryStart = (uint8_t *)malloc(INITIAL_NURSERY_SIZE);
-  base->nurseryNext = base->nurseryStart;
-  base->nurseryEnd = (uint8_t *)((long int)base->nurseryStart + INITIAL_NURSERY_SIZE);
+  base->nurseryHead = gc_alloc_chain(INITIAL_NURSERY_SIZE);
+  base->nurseryCur = base->nurseryHead;
+
+  base->nurseryStart = base->nurseryCur->start;
+  base->nurseryNext = base->nurseryCur->free;
+  base->nurseryEnd = block_group_get_end(base->nurseryCur);
   base->next_nursery_size = INITIAL_NURSERY_SIZE;
-  base->heap_aux = NULL;
 }
 
 void rapid_gc_init() {

@@ -11,6 +11,7 @@
 
 #include "builtin.h"
 #include "gc.h"
+#include "memory.h"
 #include "object.h"
 #include "rts.h"
 
@@ -66,6 +67,7 @@ void rapid_rts_init() {
 
 int rts_main(int argc, char **argv) {
   rapid_rts_init();
+  rapid_memory_init();
   rapid_gc_init();
   rapid_builtin_init(argc, argv);
 

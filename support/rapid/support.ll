@@ -36,7 +36,7 @@ target datalayout = "e-m:o-i64:64-f80:128-n8:16:32:64-S128-ni:1"
 
 %FuncPtrClosureEntry = type %Return1 (%RuntimePtr, %TSOPtr, %RuntimePtr, %ObjPtr, %ObjPtr)*
 
-declare ccc void @idris_rts_gc(%TSOPtr, i8*)
+declare ccc void @idris_rts_more_heap(%TSOPtr, i8*)
 declare ccc void @idris_rts_crash(i64) "gc-leaf-function" noreturn
 declare ccc void @idris_rts_crash_msg(%ObjPtr) "gc-leaf-function" noreturn
 declare ccc void @rapid_crash(i8*) "gc-leaf-function" noreturn
@@ -225,7 +225,7 @@ define private fastcc %Return1 @rapid_gc_enter(%RuntimePtr %HpNewPtr, %TSOPtr %B
   %heapAllocPtr = getelementptr inbounds %Idris_TSO.struct, %Idris_TSO.struct* %BaseArg, i32 0, i32 7
   store i64 %size.aligned, i64* %heapAllocPtr
 
-  call ccc void @idris_rts_gc(%TSOPtr %BaseArg, i8* %frame)
+  call ccc void @idris_rts_more_heap(%TSOPtr %BaseArg, i8* %frame)
 
   ; get updated heap pointer from BaseTSO
   %heap = load %RuntimePtr, %RuntimePtr* %heapPtr

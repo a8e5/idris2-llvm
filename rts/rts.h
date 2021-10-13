@@ -21,6 +21,8 @@ struct Idris_GC_stats {
   uint64_t pause_ns_max;
 };
 
+struct block_descr;
+
 /**
  * Thread State Object - keep track of all state for one Idris thread
  */
@@ -43,9 +45,8 @@ struct Idris_TSO_t {
   uint64_t heap_alloc;
   uint64_t next_nursery_size;
 
-  // the "old" / previous heap area so we don't need to reallocate on every GC
-  uint8_t *heap_aux;
-  uint8_t *heap_aux_end;
+  struct block_descr *nurseryHead; ///< first nursery block
+  struct block_descr *nurseryCur; ///< current nursery block
 
   struct Idris_GC_stats gc_stats;
 

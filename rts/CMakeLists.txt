@@ -8,6 +8,7 @@ set(RTS_SOURCES
   rts.c
   time.c
   ../external/llvm-statepoint-utils/build/statepoint.c
+  vendor/hashset.c
   )
 
 set(RTS_BITCODE)
