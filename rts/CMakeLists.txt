@@ -36,9 +36,10 @@ foreach(C_SOURCE ${RTS_SOURCES} "entry.c")
   string(REGEX REPLACE "\.c$" ".bc" BC_TARGET ${C_SOURCE})
   add_custom_command(
     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${BC_TARGET}"
-    COMMAND clang ARGS "-flto" "-g" "-O3" "-c"
+    COMMAND clang ARGS "-flto" "-g" "-O3" "-c" "-MMD" "-MF${CMAKE_CURRENT_BINARY_DIR}/${BC_TARGET}.d"
     ${RTS_CFLAGS} ${RTS_INCLUDE_FLAGS} "-std=c11" "-o" "${CMAKE_CURRENT_BINARY_DIR}/${BC_TARGET}" "${CMAKE_CURRENT_SOURCE_DIR}/${C_SOURCE}"
     DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${C_SOURCE}"
+    DEPFILE "${CMAKE_CURRENT_BINARY_DIR}/${BC_TARGET}.d"
     )
   set(RTS_BITCODE "${RTS_BITCODE};${CMAKE_CURRENT_BINARY_DIR}/${BC_TARGET}")
 endforeach()
@@ -58,7 +59,7 @@ add_custom_command(
   DEPENDS ${RAPID_PLATFORM_SOURCE}
   )
 
-add_custom_target(rapid_rts
+add_custom_target(rapid_rts ALL
   DEPENDS "${RAPID_RTS_LIB}" "${RAPID_PLATFORM_LIB}"
   )
 
@@ -90,4 +91,4 @@ add_custom_target(rapid_test_rts
 if (NOT TARGET test)
   add_custom_target(test)
 endif()
-add_dependencies(test rapid_test_rts)
+add_dependencies(test rapid_test_rts rapid_rts)

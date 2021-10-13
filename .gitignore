@@ -11,6 +11,7 @@
 /tests/**/output
 *.a
 *.bc
+*.bc.d
 *.o
 *.so
 .ninja_deps
