@@ -5,6 +5,7 @@
 #include "object.h"
 #include "rts.h"
 
+#include <assert.h>
 #include <time.h>
 
 extern void *get_stackmap();
@@ -14,6 +15,9 @@ extern void *get_stackmap();
 #define GC_FLAVOUR_STATEPOINT 3
 
 extern uint32_t rapid_gc_flavour;
+
+// at multiple points in the code, we assume, that size_t can hold any address
+static_assert(sizeof(size_t) >= sizeof(void *), "void * does not fit in size_t");
 
 // Define selected BDW GC functions, so we don't need BDW's gc/gc.h installed
 // to compile the RTS lib.
@@ -71,6 +75,7 @@ static inline ObjPtr alloc_during_gc(Idris_TSO *base, uint32_t size) {
     return (ObjPtr)p;
   } else {
     assert(base->nurseryCur->link);
+    base->used_nursery_size += (size_t)base->nurseryCur->free - (size_t)base->nurseryCur->start;
     base->nurseryCur = base->nurseryCur->link;
     p = base->nurseryCur->free;
     base->nurseryCur->free = p + aligned(size);
@@ -230,10 +235,11 @@ void idris_rts_gc(Idris_TSO *base, uint8_t *sp) {
   fprintf(stderr, "GC begin frame info: 0x%016llx\n", (uint64_t)frame);
 #endif
 
-  uint64_t nextNurserySize = base->next_nursery_size;
+  uint64_t thisNurserySize = base->next_nursery_size;
 
   struct block_descr *nurseryOld = base->nurseryHead;
-  base->nurseryHead = base->nurseryCur = gc_alloc_chain(nextNurserySize);
+  base->nurseryHead = base->nurseryCur = gc_alloc_chain(thisNurserySize);
+  base->used_nursery_size = 0;
 
 #ifdef RAPID_GC_DEBUG_ENABLED
   fprintf(stderr, "new nursery at: %p - %p\n", (void *)newNursery, (void *)base->nurseryEnd);
@@ -310,11 +316,14 @@ void idris_rts_gc(Idris_TSO *base, uint8_t *sp) {
 
   cheney(base);
 
-  update_heap_pointers(base);
-
   gc_free_chain(nurseryOld);
 
-  // TODO: nursery grow / shrink
+  if (base->used_nursery_size > (thisNurserySize / 2)) {
+    base->next_nursery_size = thisNurserySize * 2;
+  } else if (base->used_nursery_size < (thisNurserySize / 4)
+      && (thisNurserySize >= 2 * INITIAL_NURSERY_SIZE)) {
+    base->next_nursery_size = thisNurserySize / 2;
+  }
 
 #ifdef RAPID_GC_STATS_ENABLED
   base->gc_stats.gc_count += 1;
@@ -331,8 +340,18 @@ void idris_rts_gc(Idris_TSO *base, uint8_t *sp) {
   }
 #endif
 
-  // TODO: advance to next block group, if current one is too full to
-  // accomodate `heap_alloc`
+  // check if current block group is too full to accomodate requested
+  // `heap_alloc`
+  if ((uint64_t)base->nurseryCur->free + base->heap_alloc > (uint64_t)block_group_get_end(base->nurseryCur)) {
+    // advance to next block group in chain (if possible)
+    if (base->nurseryCur->link) {
+      base->nurseryCur = base->nurseryCur->link;
+    } else {
+      rapid_C_crash("nursery too small");
+    }
+  }
+
+  update_heap_pointers(base);
 
   assert((uint64_t)base->nurseryNext + base->heap_alloc <= (uint64_t)base->nurseryEnd);
   base->heap_alloc = 0;

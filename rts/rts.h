@@ -43,7 +43,8 @@ struct Idris_TSO_t {
   // last requested allocation size that could not be fulfilled and triggered
   // the GC
   uint64_t heap_alloc;
-  uint64_t next_nursery_size;
+  size_t next_nursery_size;
+  size_t used_nursery_size;
 
   struct block_descr *nurseryHead; ///< first nursery block
   struct block_descr *nurseryCur; ///< current nursery block
