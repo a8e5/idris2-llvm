@@ -19,6 +19,9 @@ import Libraries.Data.SortedMap
 import Libraries.Utils.Hex
 import Rapid.Common
 
+-- work around Idris issue #2032: Slow typechecking on Int operation when Data.Fin.fromInteger is in scope
+%hide Data.Fin.fromInteger
+
 OBJECT_TYPE_ID_CON_NO_ARGS : Int
 OBJECT_TYPE_ID_CON_NO_ARGS = 0xff
 
