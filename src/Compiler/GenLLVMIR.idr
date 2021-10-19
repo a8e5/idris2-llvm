@@ -78,11 +78,12 @@ repeatStr s (S x) = s ++ repeatStr s x
 
 fullShow : Name -> String
 fullShow (NS ns n) = showNSWithSep "." ns ++ "." ++ fullShow n
-fullShow (UN n) = n
+fullShow (UN (Basic n)) = n
+fullShow (UN (Field n)) = "_.(" ++ n ++ ")"
+fullShow (UN Underscore) = "_"
 fullShow (MN n i) = "_{" ++ n ++ ":" ++ show i ++ "}"
 fullShow (PV n i) = "_{P:" ++ fullShow n ++ ":" ++ show i ++ "}"
 fullShow (DN _ n) = fullShow n
-fullShow (RF n) = "_.(" ++ n ++ ")"
 fullShow (Nested (outer, idx) inner) = show outer ++ "/" ++ show idx ++ "/" ++ fullShow inner
 fullShow (CaseBlock outer i) = "case/" ++ outer ++ "$" ++ show i
 fullShow (WithBlock outer i) = "with/" ++ outer ++ "$" ++ show i
@@ -100,7 +101,7 @@ safeName s = concatMap okchar (unpack $ fullShow s)
     okchar : Char -> String
     okchar c = if isSafeChar c
                   then cast c
-                  else "$" ++ asHex (cast {to=Int} c)
+                  else "$" ++ asHex (cast {to=Bits64} c)
 
 interface ToIR a where
   toIR : a -> String
@@ -125,7 +126,7 @@ argIR _ = pure $ "undef"
 
 asHex2 : Int -> String
 asHex2 0 = "00"
-asHex2 c = let s = asHex c in
+asHex2 c = let s = asHex (cast {to=Bits64} c) in
                if length s == 1 then "0" ++ s else s
 
 doubleToHex : Double -> String
@@ -2470,7 +2471,7 @@ getInstIR i (MKCONSTANT r (B32 c)) = do
   obj <- cgMkInt (ConstI64 $ cast c)
   store obj (reg2val r)
 getInstIR i (MKCONSTANT r (B64 c)) = do
-  obj <- cgMkBits64 (ConstI64 c)
+  obj <- cgMkBits64 (ConstI64 $ cast c)
   store obj (reg2val r)
 getInstIR i (MKCONSTANT r (I c)) = do
   obj <- cgMkInt (ConstI64 $ (cast {to=Integer} c) `mod` 0x7fffffffffffffff)
@@ -2576,7 +2577,7 @@ compileExtPrimFallback n r args =
 
 compileExtPrim : Int -> Name -> Reg -> List Reg -> Codegen ()
 compileExtPrim i (NS ns n) r args with (unsafeUnfoldNamespace ns)
-  compileExtPrim i (NS ns (UN "prim__newArray")) r [_, countReg, elemReg, _] | ["Prims", "IOArray", "Data"] = do
+  compileExtPrim i (NS ns (UN $ Basic "prim__newArray")) r [_, countReg, elemReg, _] | ["Prims", "IOArray", "Data"] = do
     lblStart <- genLabel "new_array_init_start"
     lblLoop <- genLabel "new_array_init_loop"
     lblEnd <- genLabel "new_array_init_end"
@@ -2604,7 +2605,7 @@ compileExtPrim i (NS ns n) r args with (unsafeUnfoldNamespace ns)
     beginLabel lblEnd
     store newObj (reg2val r)
 
-  compileExtPrim i (NS ns (UN "prim__arrayGet")) r [_, arrReg, indexReg, _] | ["Prims", "IOArray", "Data"] = do
+  compileExtPrim i (NS ns (UN $ Basic "prim__arrayGet")) r [_, arrReg, indexReg, _] | ["Prims", "IOArray", "Data"] = do
     index <- unboxInt (reg2val indexReg)
     array <- load (reg2val arrReg)
 
@@ -2613,7 +2614,7 @@ compileExtPrim i (NS ns n) r args with (unsafeUnfoldNamespace ns)
 
     store val (reg2val r)
 
-  compileExtPrim i (NS ns (UN "prim__arraySet")) r [_, arrReg, indexReg, valReg, _] | ["Prims", "IOArray", "Data"] = do
+  compileExtPrim i (NS ns (UN $ Basic "prim__arraySet")) r [_, arrReg, indexReg, valReg, _] | ["Prims", "IOArray", "Data"] = do
     index <- unboxInt (reg2val indexReg)
     array <- load (reg2val arrReg)
     val <- load (reg2val valReg)
@@ -2621,27 +2622,27 @@ compileExtPrim i (NS ns n) r args with (unsafeUnfoldNamespace ns)
     addr <- getObjectSlotAddrVar array index
     store val addr
 
-  compileExtPrim i (NS ns (UN "prim__codegen")) r [] | ["Info", "System"] = do
+  compileExtPrim i (NS ns (UN $ Basic "prim__codegen")) r [] | ["Info", "System"] = do
     store !(mkStr i "rapid") (reg2val r)
-  compileExtPrim i (NS ns (UN "prim__os")) r [] | ["Info", "System"] = do
+  compileExtPrim i (NS ns (UN $ Basic "prim__os")) r [] | ["Info", "System"] = do
     -- no cross compiling for now:
     store !(mkStr i System.Info.os) (reg2val r)
-  compileExtPrim i (NS ns (UN "void")) r _ | ["Uninhabited", "Prelude"] = do
+  compileExtPrim i (NS ns (UN $ Basic "void")) r _ | ["Uninhabited", "Prelude"] = do
     appendCode $ "  call ccc void @rapid_crash(i8* bitcast ([23 x i8]* @error_msg_void to i8*)) noreturn"
     appendCode $ "unreachable"
-  compileExtPrim i (NS ns (UN "prim__void")) r _ | ["Uninhabited", "Prelude"] = do
+  compileExtPrim i (NS ns (UN $ Basic "prim__void")) r _ | ["Uninhabited", "Prelude"] = do
     appendCode $ "  call ccc void @rapid_crash(i8* bitcast ([23 x i8]* @error_msg_void to i8*)) noreturn"
     appendCode $ "unreachable"
-  compileExtPrim i (NS ns (UN "prim__newIORef")) r [_, val, _] | ["IORef", "Data"] = do
+  compileExtPrim i (NS ns (UN $ Basic "prim__newIORef")) r [_, val, _] | ["IORef", "Data"] = do
     ioRefObj <- dynamicAllocate (Const I64 8)
     putObjectHeader ioRefObj !(mkHeader OBJECT_TYPE_ID_IOREF (Const I32 0))
     putObjectSlot ioRefObj (Const I64 0) !(load $ reg2val val)
     store ioRefObj (reg2val r)
-  compileExtPrim i (NS ns (UN "prim__readIORef")) r [_, ioRefArg, _] | ["IORef", "Data"] = do
+  compileExtPrim i (NS ns (UN $ Basic "prim__readIORef")) r [_, ioRefArg, _] | ["IORef", "Data"] = do
     ioRefObj <- load $ reg2val ioRefArg
     payload <- getObjectSlot ioRefObj 0
     store payload (reg2val r)
-  compileExtPrim i (NS ns (UN "prim__writeIORef")) r [_, ioRefArg, payloadArg, _] | ["IORef", "Data"] = do
+  compileExtPrim i (NS ns (UN $ Basic "prim__writeIORef")) r [_, ioRefArg, payloadArg, _] | ["IORef", "Data"] = do
     ioRefObj <- load $ reg2val ioRefArg
     payload <- load $ reg2val payloadArg
     putObjectSlot ioRefObj (Const I64 0) payload

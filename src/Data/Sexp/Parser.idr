@@ -44,4 +44,4 @@ export
 parseSexp : List (WithBounds Token) -> Either (String) (List Sexp)
 parseSexp toks = case parse sexpMain toks of
                       Left ((Error s remaining):::_) => Left $ "parse error: \"" ++ s ++ "\"\nremaining tokens: " ++ (show "xxx")
-                      Right (e, toks) => Right e
+                      Right (_, e, toks) => Right e
