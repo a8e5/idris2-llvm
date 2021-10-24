@@ -27,6 +27,7 @@ if [[ -n "$1" ]]; then
       rapid006
       rapid008
       rapid012
+      rapid013
     )
   else
     read -r -a tests <<< "$@"

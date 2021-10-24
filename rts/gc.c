@@ -290,11 +290,24 @@ void idris_rts_gc(Idris_TSO *base, uint8_t *sp) {
 #ifdef RAPID_GC_DEBUG_ENABLED
     fprintf(stderr, "\nnursery will grow next GC: %llu -> %llu\n", nextNurserySize, base->next_nursery_size);
 #endif
-  } else if (nurseryUsed < (base->next_nursery_size >> 2)
-      && (base->next_nursery_size >= 2*INITIAL_NURSERY_SIZE)) {
-    base->next_nursery_size = base->next_nursery_size / 2;
+  } else if ((nurseryUsed + base->heap_alloc) < (nextNurserySize >> 2)
+      && (nextNurserySize >= 2*INITIAL_NURSERY_SIZE)) {
+    // If less than 25% of currently avaiable heap used, shrink it.
+    // We have to perform the shrinking immediately, because during next GC,
+    // the live data might already be too big for the planned shrinking.
+    nextNurserySize = nextNurserySize / 2;
+    base->next_nursery_size = nextNurserySize;
+    base->nurseryEnd = (uint8_t *) ((uint64_t)base->nurseryStart + nextNurserySize);
+
+    // shrink the old heap allocation to potentially give back memory to the OS
+    base->heap_aux = realloc(base->heap_aux, base->next_nursery_size);
+
+    // Not sure if the following would be safe, because realloc might move the memory.
+    // TODO: Find out if realloc is allowed to move the region when it is
+    // smaller than the original allocation:
+    // base->nurseryStart = realloc(base->nurseryStart, base->next_nursery_size);
 #ifdef RAPID_GC_DEBUG_ENABLED
-    fprintf(stderr, "\nnursery will shrink next GC: %llu(used) / %llu -> %llu\n", nurseryUsed, nextNurserySize, base->next_nursery_size);
+    fprintf(stderr, "\nnursery shrunk: %llu(used) / %llu -> %llu\n", nurseryUsed, 2*nextNurserySize, base->next_nursery_size);
 #endif
   }
 
@@ -328,6 +341,11 @@ void idris_rts_gc(Idris_TSO *base, uint8_t *sp) {
   // There's probably a more efficient way to do this, but this should be rare
   // enough, that it shouldn't matter too much.
   if ((uint64_t)base->nurseryNext + base->heap_alloc > (uint64_t)base->nurseryEnd) {
+    if (base->next_nursery_size <= nextNurserySize) {
+      // If planned nursery size has not already been grown, do that now to
+      // avoid an infinite GC loop.
+      base->next_nursery_size = nextNurserySize * 2;
+    }
 #ifdef RAPID_GC_DEBUG_ENABLED
     fprintf(stderr, "WARNING: still not enough room for requested allocation of %llu bytes, recurse GC\n", base->heap_alloc);
 #endif
