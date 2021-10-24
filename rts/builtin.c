@@ -898,8 +898,9 @@ int32_t rapid_bigint_set_str(ObjPtr destIntegerObj, const ObjPtr srcStr) {
     ++src;
   }
 
-  mpn_set_str(OBJ_PAYLOAD(destIntegerObj), scratch, strLength, 10);
-  int real_size = rapid_bigint_real_size(OBJ_PAYLOAD(destIntegerObj), maxSize);
+  mp_size_t nlimbs = mpn_set_str(OBJ_PAYLOAD(destIntegerObj), scratch, strLength, 10);
+  assert(nlimbs <= maxSize);
+  int real_size = rapid_bigint_real_size(OBJ_PAYLOAD(destIntegerObj), nlimbs);
 
   destIntegerObj->hdr = MAKE_HEADER(OBJ_TYPE_BIGINT, negate ? (-real_size) : real_size);
 
