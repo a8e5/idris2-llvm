@@ -21,6 +21,8 @@ bool is_heap_alloc(void *p);
 void *alloc_block_group(size_t num_blocks);
 void free_block_group(void *p);
 
+void* alloc_large_obj(size_t generation_number, uint64_t size);
+
 #define BLOCK_SHIFT 12
 #define BLOCK_SIZE (uint64_t)(1 << BLOCK_SHIFT)
 

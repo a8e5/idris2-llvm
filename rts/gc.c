@@ -372,6 +372,12 @@ idris_rts_more_heap(Idris_TSO *base, uint8_t *sp) {
   }
 }
 
+ObjPtr
+idris_rts_alloc_large(Idris_TSO *base, uint8_t *sp, uint64_t size) {
+  assert(size > BLOCK_SIZE && "small allocation requested via rts_alloc_large");
+  return alloc_large_obj(0, size);
+}
+
 void
 rapid_gc_finalize_stats(Idris_TSO *base) {
   uint64_t current_heap_used = (uint64_t)base->nurseryNext - (uint64_t)base->nurseryStart;

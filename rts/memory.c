@@ -222,7 +222,30 @@ static void *take_from_freelist(size_t num_blocks) {
   return NULL;
 }
 
+/**
+ * Number of required clusters for an oversize-allocation
+ */
+static inline size_t required_clusters(size_t num_blocks) {
+  assert(num_blocks > CLUSTER_MAX_BLOCKS);
+  size_t BLOCKS_PER_OVERSIZE_CLUSTER = CLUSTER_SIZE / BLOCK_SIZE;
+  return 1 + (num_blocks - CLUSTER_MAX_BLOCKS + BLOCKS_PER_OVERSIZE_CLUSTER - 1)
+    / BLOCKS_PER_OVERSIZE_CLUSTER;
+}
+
+void *alloc_oversized_block_group(size_t num_blocks) {
+  size_t num_clusters = required_clusters(num_blocks);
+
+  void *cluster = alloc_clusters(num_clusters);
+  void *start = cluster_get_block_start(cluster, CLUSTER_FIRST_BLOCK_INDEX);
+  init_block_group(start, num_blocks);
+
+  return start;
+}
+
 void *alloc_block_group(size_t num_blocks) {
+  if (num_blocks > CLUSTER_MAX_BLOCKS) {
+    return alloc_oversized_block_group(num_blocks);
+  }
   assert(num_blocks <= CLUSTER_MAX_BLOCKS && "big groups not yet implemented");
 
   void *start = take_from_freelist(num_blocks);
@@ -242,6 +265,16 @@ void *alloc_block_group(size_t num_blocks) {
   return start;
 }
 
+void *
+alloc_large_obj(size_t generation_number, uint64_t size) {
+  uint64_t required_blocks = size / BLOCK_SIZE;
+  void *data = alloc_block_group(required_blocks);
+  struct block_descr *bdescr = get_block_descr(data);
+  bdescr->link = rapid_mem.generations[generation_number].large_objects;
+  rapid_mem.generations[generation_number].large_objects = bdescr;
+
+  return data;
+}
 
 // TESTS
 

@@ -37,6 +37,7 @@ target datalayout = "e-m:o-i64:64-f80:128-n8:16:32:64-S128-ni:1"
 %FuncPtrClosureEntry = type %Return1 (%RuntimePtr, %TSOPtr, %RuntimePtr, %ObjPtr, %ObjPtr)*
 
 declare ccc void @idris_rts_more_heap(%TSOPtr, i8*)
+declare ccc %ObjPtr @idris_rts_alloc_large(%TSOPtr, i8*, i64) gc "statepoint-example"
 declare ccc void @idris_rts_crash(i64) "gc-leaf-function" noreturn
 declare ccc void @idris_rts_crash_msg(%ObjPtr) "gc-leaf-function" noreturn
 declare ccc void @rapid_crash(i8*) "gc-leaf-function" noreturn
@@ -306,7 +307,7 @@ define private fastcc i1 @rapid.ptrisnull(%ObjPtr noalias nocapture nofree reado
 
 declare ccc %ObjPtr @malloc(i64)
 
-define external fastcc %Return1 @rapid_allocate_fast (%RuntimePtr %HpPtrArg, %TSOPtr %BaseArg, %RuntimePtr %HpLimPtrArg, i64 %size) noinline nounwind gc "statepoint-example" {
+define external fastcc %Return1 @rapid_allocate_small (%RuntimePtr %HpPtrArg, %TSOPtr %BaseArg, %RuntimePtr %HpLimPtrArg, i64 %size) gc "statepoint-example" {
   %Hp = ptrtoint %RuntimePtr %HpPtrArg to i64
 
   %nurseryEndPtr = getelementptr inbounds %Idris_TSO.struct, %Idris_TSO.struct *%BaseArg, i32 0, i32 2
@@ -339,6 +340,35 @@ continue:
 gc_enter:
   %gcresult = tail call fastcc %Return1 @rapid_gc_enter(%RuntimePtr %HpNewPtr, %TSOPtr %BaseArg, i64 %size.aligned)
   ret %Return1 %gcresult
+}
+
+define external fastcc %Return1 @rapid_allocate_fast (%RuntimePtr %HpPtrArg, %TSOPtr %BaseArg, %RuntimePtr %HpLimPtrArg, i64 %size) gc "statepoint-example" {
+; SMALL_OBJ_THRESHOLD = 4096
+  %isbig.in = icmp ugt i64 %size, 4096
+  %isbig = call ccc i1 @llvm.expect.i1(i1 %isbig.in, i1 0)
+  br i1 %isbig, label %big, label %small
+
+small:
+  %result = tail call fastcc %Return1 @rapid_allocate_small(%RuntimePtr %HpPtrArg, %TSOPtr %BaseArg, %RuntimePtr %HpLimPtrArg, i64 %size)
+  ret %Return1 %result
+
+big:
+  %heapPtr = getelementptr inbounds %Idris_TSO.struct, %Idris_TSO.struct* %BaseArg, i32 0, i32 1
+  %frame = call i8* @llvm.addressofreturnaddress()
+
+;TODO: this is probably not needed:
+;(i.e. the C code does not care for current allocation pointer)
+  store %RuntimePtr %HpPtrArg, %RuntimePtr* %heapPtr
+
+  %newObject = call ccc %ObjPtr @idris_rts_alloc_large(%TSOPtr %BaseArg, i8* %frame, i64 %size)
+
+  ; get updated heap pointer from BaseTSO
+  %heap = load %RuntimePtr, %RuntimePtr* %heapPtr
+
+  %packed1 = insertvalue %Return1 undef, %RuntimePtr %heap, 0
+  %packed2 = insertvalue %Return1 %packed1, %RuntimePtr undef, 1
+  %packed3 = insertvalue %Return1 %packed2, %ObjPtr %newObject, 2
+  ret %Return1 %packed3
 }
 
 define private fastcc i64 @idris_enter_stackbridge(%TSOPtr %BaseTSO, i8* %heapStart, i8* %heapEnd) {
