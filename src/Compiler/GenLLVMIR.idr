@@ -3030,7 +3030,8 @@ mk_prim__stringIteratorNext [strObj, iteratorObj] = do
        store eofObj (reg2val RVal)
     ) (do
        resultObj <- dynamicAllocate (Const I64 16)
-       hdr <- mkHeader OBJECT_TYPE_ID_CON_NO_ARGS TAG_UNCONS_RESULT_CHARACTER
+       hdrWithoutSize <- mkHeader OBJECT_TYPE_ID_CON_NO_ARGS TAG_UNCONS_RESULT_CHARACTER
+       hdr <- mkOr hdrWithoutSize (Const I64 (2 `prim__shl_Integer` 40))
        putObjectHeader resultObj hdr
 
        payload0 <- getObjectPayloadAddr {t=I8} strObj
