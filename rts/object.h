@@ -91,7 +91,7 @@ static inline bool OBJ_IS_FWD_INPLACE(ObjPtr p) {
   return (p->hdr & 0x8000000000000000ull);
 }
 
-static inline RapidObjectHeader MAKE_HEADER(int64_t objType, int32_t sizeOrTag) {
+static inline RapidObjectHeader MAKE_HEADER(uint64_t objType, uint32_t sizeOrTag) {
   return (objType << 32) | sizeOrTag;
 }
 
