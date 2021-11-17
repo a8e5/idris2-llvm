@@ -87,24 +87,14 @@ ObjPtr evacuate(Idris_TSO *base, ObjPtr p) {
   }
   assert(((uint64_t)p >= (uint64_t)base->heap_aux) && ((uint64_t)p < (uint64_t)base->heap_aux_end) && "object is not inside old nursery");
 
-  switch (OBJ_TYPE(p)) {
-    case OBJ_TYPE_FWD_REF:
-      return (ObjPtr)OBJ_GET_SLOT(p, 0);
-    default:
-      size = OBJ_TOTAL_SIZE(p);
-      new = alloc_during_gc(base, size);
-      memcpy(new, p, size);
+  size = OBJ_TOTAL_SIZE(p);
+  new = alloc_during_gc(base, size);
+  memcpy(new, p, size);
 #ifdef RAPID_GC_DEBUG_ENABLED
-      fprintf(stderr, "-- object copied: %p -> %p (%u bytes)\n", (void *)p, (void *)new, size);
+  fprintf(stderr, "-- object copied: %p -> %p (%u bytes)\n", (void *)p, (void *)new, size);
 #endif
-      if (size >= 16) {
-        p->hdr = MAKE_HEADER(OBJ_TYPE_FWD_REF, 8);
-        p->data = new;
-      } else {
-        p->hdr = 0x8000000000000000ull | (((uint64_t)new) >> 1);
-      }
-      return new;
-  }
+  p->hdr = OBJ_MAKE_FWD_INPLACE(new);
+  return new;
 }
 
 static inline void scavenge(Idris_TSO *base, ObjPtr obj) {
@@ -150,9 +140,6 @@ static inline void scavenge(Idris_TSO *base, ObjPtr obj) {
           OBJ_PUT_SLOT(obj, i, valCopy);
         }
       }
-      break;
-    case OBJ_TYPE_FWD_REF:
-      rapid_C_crash("illegal forward ref found");
       break;
     default:
       break;

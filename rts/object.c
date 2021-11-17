@@ -61,9 +61,6 @@ int dump_obj_i(ObjPtr o, int indent) {
   if (OBJ_TYPE(o) == OBJ_TYPE_INT) {
     INDENT(indent); fprintf(stderr, "INT value: %lld\n", (int64_t)OBJ_GET_SLOT(o, 0));
   }
-  if (OBJ_TYPE(o) == OBJ_TYPE_FWD_REF) {
-    INDENT(indent); fprintf(stderr, "FWD REF value: -> %p\n", (void *)OBJ_GET_SLOT(o, 0));
-  }
   if (OBJ_TYPE(o) == OBJ_TYPE_STRING) {
     uint32_t strsize = OBJ_SIZE(o);
     const char *truncated = "";

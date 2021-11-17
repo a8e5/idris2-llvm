@@ -34,8 +34,6 @@
 // Clock object size -> 0: invalid, 1: valid
 #define OBJ_TYPE_CLOCK       0x0b
 
-#define OBJ_TYPE_FWD_REF     0xfd
-
 typedef uint64_t RapidObjectHeader;
 
 #define HEADER_SIZE 8
@@ -87,6 +85,10 @@ static inline void *OBJ_PAYLOAD(ObjPtr p) {
 #define OBJ_IS_INLINE(p) ((p) == NULL || (uint64_t)(p) & 0x07)
 #define OBJ_UNBOX_INT(p) ((int64_t)(p) >> 1)
 
+static inline uint64_t OBJ_MAKE_FWD_INPLACE(ObjPtr p) {
+  return 0x8000000000000000ull | (((uint64_t)p) >> 1);
+}
+
 static inline bool OBJ_IS_FWD_INPLACE(ObjPtr p) {
   return (p->hdr & 0x8000000000000000ull);
 }
@@ -128,9 +130,6 @@ static inline uint32_t OBJ_TOTAL_SIZE(ObjPtr p) {
     case OBJ_TYPE_CLOCK:
       // 8 byte header + 2 * 64 bits for seconds & nanoseconds)
       return 8 + 16;
-    case OBJ_TYPE_FWD_REF:
-      rapid_C_crash("invalid fwd ref in OBJ_TOTAL_SIZE");
-      return 0;
     default:
       fprintf(stderr, "unknown object type: 0x%08llx\n", (h>>32));
       rapid_C_crash("unknown object type");

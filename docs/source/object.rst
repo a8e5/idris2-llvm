@@ -116,8 +116,6 @@ all object types:
 +------------------------+---------------------------+------------------------------------+---------------------------------------------------------------------+
 | CLOCK                  | 0x0b                      | (ignored)                          | 16 bytes: seconds (64 bit uint), nanoseconds (64 bit uint)          |
 +------------------------+---------------------------+------------------------------------+---------------------------------------------------------------------+
-| FWD_REF [#only_gc]_    | 0xfd                      | (ignored)                          | 8 bytes: Pointer to the relocated object                            |
-+------------------------+---------------------------+------------------------------------+---------------------------------------------------------------------+
 | CONSTRUCTOR            | | 0xff                    | tag of the constructor             | | 8 * ``n`` bytes: ``n`` values                                     |
 |                        | | see "special" in payload|                                    | | Value ``n`` is stored in the 24 highest bits ("left" of the type) |
 +------------------------+---------------------------+------------------------------------+---------------------------------------------------------------------+
@@ -128,4 +126,20 @@ all object types:
             by 64 bits of payload
 .. [#char_obsolete] Obsolete, `Char` values will soon be represented as
                     immediate values
-.. [#only_gc] Forwarding pointers occur only temporary during GC pauses
+
+During garbage collection, the object header may be replaced with a special
+"in-place forwarding pointer" which consists of the target pointer shifted one
+bit to the right, and the highest bit set.
+
+::
+
+  In-place forwarding pointer object header (64 bit):
+
+  +--------------------+-----------------------+----------------------------------+
+  | 1 highest bit      | 63 lowest bits        | variable unused space (optional) |
+  +====================+=======================+----------------------------------+
+  | 1                  | (target_ptr) >> 1     | never accessed (former payload)  |
+  +--------------------+-----------------------+----------------------------------+
+
+No such header should remain after GC is completed. I.e. normal porgram
+execution will never encounter an object with such header.
