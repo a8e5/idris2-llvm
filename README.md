@@ -1,4 +1,4 @@
-[![builds.sr.ht status](https://builds.sr.ht/~cypheon/rapid/commits/.build.yml.svg?name=Debian%c2%a0%c2%a0%c2%a0%c2%a0%c2%a0)](https://builds.sr.ht/~cypheon/rapid/commits/.build.yml?)
+[![builds.sr.ht status](https://builds.sr.ht/~cypheon/rapid/commits/cmake.yml.svg?name=Debian%c2%a0%c2%a0%c2%a0%c2%a0%c2%a0)](https://builds.sr.ht/~cypheon/rapid/commits/cmake.yml?)
 [![builds.sr.ht status](https://builds.sr.ht/~cypheon/rapid/commits/freebsd.yml.svg?name=FreeBSD%c2%a0%c2%a0%c2%a0)](https://builds.sr.ht/~cypheon/rapid/commits/freebsd.yml?)
 
 # LLVM codegen and native runtime for Idris 2
