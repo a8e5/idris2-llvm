@@ -6,6 +6,9 @@ import Data.String
 big : Int
 big = 100000000
 
+medium : Int
+medium = 100000
+
 makeBigString : String -> IO ()
 makeBigString s = do
   putStrLn ("string length is now " ++ (show $ strLength s))
@@ -16,6 +19,14 @@ makeBigString s = do
 
 main : IO ()
 main = do
+  med <- newArray medium
+  ignore $ writeArray med 0 "first medium array element"
+  ignore $ writeArray med (medium - 1) "last medium array element"
+  ignore $ writeArray med (medium `div` 2) "somewhere in the middle (medium)"
+  printLn =<< readArray med 0
+  printLn =<< readArray med (medium - 1)
+  printLn =<< readArray med (medium `div` 2)
+
   arr <- newArray big
   ignore $ writeArray arr 0 "first array element"
   ignore $ writeArray arr (big - 1) "last array element"
