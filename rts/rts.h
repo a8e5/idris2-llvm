@@ -28,7 +28,7 @@ struct block_descr;
  */
 struct Idris_TSO_t {
   // nursery area - all objects are allocated here
-  uint8_t *nurseryStart;
+  uint8_t *nurseryStart; //< currently unused
   uint8_t *nurseryNext; // next allocation will return this pointer
   uint8_t *nurseryEnd;
 

@@ -210,7 +210,6 @@ static void gc_free_chain(struct block_descr *head) {
 }
 
 static inline void update_heap_pointers(Idris_TSO *base) {
-  base->nurseryStart = base->nurseryCur->start;
   base->nurseryNext = base->nurseryCur->free;
   base->nurseryEnd = block_group_get_end(base->nurseryCur);
 }
@@ -380,8 +379,6 @@ idris_rts_alloc_large(Idris_TSO *base, uint8_t *sp, uint64_t size) {
 
 void
 rapid_gc_finalize_stats(Idris_TSO *base) {
-  uint64_t current_heap_used = (uint64_t)base->nurseryNext - (uint64_t)base->nurseryStart;
-  base->gc_stats.allocated_bytes_total += current_heap_used;
 }
 
 void rapid_gc_setup_heap(Idris_TSO *base) {
