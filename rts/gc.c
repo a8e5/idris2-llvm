@@ -104,6 +104,19 @@ ObjPtr evacuate(Idris_TSO *base, ObjPtr p) {
     return p;
   }
 
+  struct block_descr *bdescr = get_block_descr(p);
+  if (bdescr->flags & BLOCKDESCR_FLAG_LARGE_OBJECT) {
+    if (!(bdescr->flags & BLOCKDESCR_FLAG_EVACUATED)) {
+      bdescr->flags |= BLOCKDESCR_FLAG_EVACUATED;
+      dbl_link_remove(&rapid_mem.generations[0].large_objects, bdescr);
+
+      list_insert(&rapid_mem.generations[0].large_objects_scavenge, bdescr);
+    }
+
+    // large objects are not copied
+    return p;
+  }
+
   size = OBJ_TOTAL_SIZE(p);
   new = alloc_during_gc(base, size);
   memcpy(new, p, size);
@@ -170,16 +183,67 @@ static inline void scavenge(Idris_TSO *base, ObjPtr obj) {
 #endif
 }
 
-static void cheney(Idris_TSO *base) {
-  struct block_descr *bdesc = base->nurseryHead;
+/**
+ * Scavenge the nursery, return `true` if any work has been done
+ */
+static bool cheney(Idris_TSO *base) {
+  bool work_done = false;
+  struct block_descr *bdesc = base->nurseryScavenge;
   while (bdesc && bdesc->free != bdesc->start) {
-    uint8_t *scan = bdesc->start;
+    uint8_t *scan = bdesc->pending;
     while(scan < (uint8_t *)bdesc->free) {
       scavenge(base, (ObjPtr)scan);
+      work_done = true;
       scan += aligned(OBJ_TOTAL_SIZE((ObjPtr)scan));
     }
+
+    // TODO: this may not be necessary for every scanned block
+    // it may be enough to only do this for the last scanned (not completely
+    // full) block:
+    bdesc->pending = scan;
+
+    // need to store the last block we actually scanned:
+    base->nurseryScavenge = bdesc;
+
     bdesc = bdesc->link;
   }
+
+  assert(base->nurseryScavenge == base->nurseryCur);
+  assert(base->nurseryScavenge->pending == base->nurseryCur->free);
+
+  return work_done;
+}
+
+/**
+ * Scavenge large objects to evacuate all objects referenced from the large
+ * object.
+ * Return `true` if any work has been done
+ */
+static bool scavenge_large_objects(Idris_TSO *base) {
+  bool work_done = false;
+
+  struct block_descr *bdescr;
+  while((bdescr = list_pop(&rapid_mem.generations[0].large_objects_scavenge))) {
+#ifdef RAPID_GC_DEBUG_ENABLED
+    fprintf(stderr, "================================== scavenge LARGE obj start\n");
+    dump_obj(bdescr->start);
+    fprintf(stderr, "================================== scavenge LARGE obj start\n");
+#endif
+
+    assert(bdescr->flags & BLOCKDESCR_FLAG_EVACUATED);
+
+    scavenge(base, bdescr->start);
+    work_done = true;
+
+    list_insert(&rapid_mem.generations[0].live_large_objects, bdescr);
+
+#ifdef RAPID_GC_DEBUG_ENABLED
+    fprintf(stderr, "================================== scavenge LARGE obj end\n");
+    dump_obj(bdescr->start);
+    fprintf(stderr, "================================== scavenge LARGE obj end\n");
+#endif
+  }
+  return work_done;
 }
 
 /**
@@ -194,6 +258,7 @@ static struct block_descr *gc_alloc_chain(size_t size) {
     void *mem = alloc_block_group(CLUSTER_MAX_BLOCKS);
     struct block_descr *next_head = get_block_descr(mem);
     next_head->link = head;
+    next_head->pending = next_head->start;
     allocated_size += next_head->num_blocks * BLOCK_SIZE;
     head = next_head;
   } while (allocated_size < size);
@@ -207,6 +272,29 @@ static void gc_free_chain(struct block_descr *head) {
     free_block_group(bdesc->start);
     bdesc = next;
   }
+}
+
+/**
+ * Free all non-evacuated large objects, move all scavenged large objects from
+ * live_large_objects list to large_objects list.
+ */
+static void free_large_objects(Idris_TSO *base) {
+  // at this point there should be no large objects left to scavenge
+  assert(rapid_mem.generations[0].large_objects_scavenge == NULL);
+
+  gc_free_chain(rapid_mem.generations[0].large_objects);
+  rapid_mem.generations[0].large_objects = NULL;
+
+  struct block_descr *bdescr;
+  while((bdescr = list_pop(&rapid_mem.generations[0].live_large_objects))) {
+    assert(bdescr->flags & BLOCKDESCR_FLAG_EVACUATED);
+    // reset "EVACUATED" flag for next GC cycle:
+    bdescr->flags &= ~BLOCKDESCR_FLAG_EVACUATED;
+    dbl_link_insert(&rapid_mem.generations[0].large_objects, bdescr);
+  }
+
+  assert(rapid_mem.generations[0].large_objects_scavenge == NULL);
+  assert(rapid_mem.generations[0].live_large_objects == NULL);
 }
 
 static inline void update_heap_pointers(Idris_TSO *base) {
@@ -240,9 +328,8 @@ void idris_rts_gc(Idris_TSO *base, uint8_t *sp) {
   base->nurseryHead = base->nurseryCur = gc_alloc_chain(thisNurserySize);
   base->used_nursery_size = 0;
 
-#ifdef RAPID_GC_DEBUG_ENABLED
-  fprintf(stderr, "new nursery at: %p - %p\n", (void *)newNursery, (void *)base->nurseryEnd);
-#endif
+  // precondition for GC
+  assert(rapid_mem.generations[0].large_objects_scavenge == NULL);
 
   while (frame != NULL) {
     uint8_t *bp = *(uint8_t **)fp;
@@ -313,9 +400,26 @@ void idris_rts_gc(Idris_TSO *base, uint8_t *sp) {
 #endif
   }
 
-  cheney(base);
+  // preconditions for scavenge loop
+  assert(base->nurseryScavenge == NULL);
+  assert(rapid_mem.generations[0].live_large_objects == NULL);
 
+  base->nurseryScavenge = base->nurseryHead;
+
+  // Scavenge all freshly evacuated objects and large objects.
+  // This may require multiple iterations, because a large object can in turn
+  // reference a "new" (small) object which needs to be scavenged as well.
+  bool work_done;
+  do {
+    work_done = false;
+    work_done = work_done || cheney(base);
+    work_done = work_done || scavenge_large_objects(base);
+  } while(work_done);
+
+  free_large_objects(base);
   gc_free_chain(nurseryOld);
+
+  base->nurseryScavenge = NULL;
 
   if (base->used_nursery_size > (thisNurserySize / 2)) {
     base->next_nursery_size = thisNurserySize * 2;

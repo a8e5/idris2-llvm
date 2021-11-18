@@ -12,6 +12,8 @@
 #include <stddef.h>
 #include <stdlib.h>
 
+#include "vendor/hashset.h"
+
 void rapid_memory_init();
 
 void *alloc_clusters(size_t count);
@@ -64,10 +66,62 @@ struct block_descr {
   size_t num_blocks;
   struct cellblock_info cellinfo; // only for cell-blocks
   void *pending; // only needed during GC
+  /// linked-list link to next block
   struct block_descr *link;
-  void *other3;
-  void *other4;
+  /// linked-list link to previous block
+  struct block_descr *back;
+
+  uint16_t flags;
+  uint16_t _padding1;
+  uint32_t _padding2;
 };
+
+#define BLOCKDESCR_FLAG_EVACUATED 0x01u
+#define BLOCKDESCR_FLAG_LARGE_OBJECT 0x02u
+
+#define NUM_GENERATIONS 3
+
+// minimum object size: 2^4 = 16 bytes
+#define SIZECLASS_MIN 4
+// maximum object size: 2^11 = 2048 bytes
+#define SIZECLASS_MAX 11
+
+#define LARGE_OBJECT_THRESHOLD (1 << SIZECLASS_MAX)
+
+struct rapid_generation {
+  int generation_number;
+  struct block_descr *free;
+
+  /// Allocated large objects (doubly-linked)
+  struct block_descr *large_objects;
+
+  /// Gather live large objects during GC (singly-linked) that need to be scavenged
+  struct block_descr *large_objects_scavenge;
+
+  /// Large objects durign GC that are completely scavenged
+  struct block_descr *live_large_objects;
+
+  // nonmoving:
+  struct block_descr *free_ptr[SIZECLASS_MAX - SIZECLASS_MIN];
+};
+
+#define NUM_FREE_LISTS (CLUSTER_SHIFT - BLOCK_SHIFT)
+struct rapid_memory {
+  struct rapid_generation generations[NUM_GENERATIONS];
+
+  /**
+   * Store block groups by log2(num_blocks)
+   * free_list[n] contains block groups where 2^n <= num_blocks < 2^(n+1)
+   * So for 1MiB-sized clusters each containing 256 4KiB-sized blocks, we end
+   * up with 8 free_lists, the largest one free_list[7] containing all free
+   * block groups of 128 - 255 blocks.
+   */
+  struct block_descr *free_list[NUM_FREE_LISTS];
+
+  hashset_t all_clusters;
+};
+
+extern struct rapid_memory rapid_mem;
 
 static inline struct block_descr *get_block_descr(void *X) {
   uint64_t cluster_start = (uint64_t)(X) & CLUSTER_CLUSTER_MASK;
@@ -78,4 +132,54 @@ static inline struct block_descr *get_block_descr(void *X) {
 
 static inline void *block_group_get_end(struct block_descr *bdesc) {
   return (char *)bdesc->start + (BLOCK_SIZE * bdesc->num_blocks);
+}
+
+/// Remove from doubly-linked list
+static inline void dbl_link_remove(struct block_descr **head, struct block_descr *b) {
+  if (head && *head == b) {
+    *head = b->link;
+  }
+  if (b->link) {
+    b->link->back = b->back;
+  }
+  if (b->back) {
+    b->back->link = b->link;
+  }
+  b->link = NULL;
+  b->back = NULL;
+}
+
+/// Insert at beginning of doubly-linked list
+static inline void dbl_link_insert(struct block_descr **head, struct block_descr *b) {
+  assert(!b->link);
+  assert(!b->back);
+  b->link = *head;
+  if(*head) {
+    assert(!(*head)->back);
+    (*head)->back = b;
+  }
+  *head = b;
+}
+
+/// Insert at beginning of singly-linked list
+static inline void list_insert(struct block_descr **head, struct block_descr *b) {
+  assert(!b->link);
+  assert(!b->back);
+  assert(head);
+  b->link = *head;
+  //if(*head) {
+    //assert(!(*head)->back);
+    //(*head)->back = b;
+  //}
+  *head = b;
+}
+
+/// Remove and return first element of singly-linked list
+static inline struct block_descr *list_pop(struct block_descr **head) {
+  struct block_descr *result = *head;
+  if (result) {
+    *head = result->link;
+    result->link = NULL;
+  }
+  return result;
 }

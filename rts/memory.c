@@ -19,14 +19,10 @@
 
 #include <pthread.h>
 
-#include "vendor/hashset.h"
-
 static_assert(CLUSTER_FIRST_BLOCK_OFFSET == 16384, "verify expected first block offset");
 
 static void add_to_freelist(void *start);
 static void *take_from_freelist(size_t num_blocks);
-
-#define NUM_GENERATIONS 3
 
 void CRASH(const char *msg) {
   fputs(msg, stderr);
@@ -34,40 +30,9 @@ void CRASH(const char *msg) {
   exit(17);
 }
 
-// minimum object size: 2^4 = 16 bytes
-#define SIZECLASS_MIN 4
-// maximum object size: 2^11 = 2048 bytes
-#define SIZECLASS_MAX 11
-
-#define LARGE_OBJECT_THRESHOLD (1 << SIZECLASS_MAX)
-
 static_assert(sizeof(struct block_descr) == BLOCKDESCR_SIZE, "block_descr struct is too large");
 
-struct rapid_generation {
-  int generation_number;
-  struct block_descr *free;
-  struct block_descr *large_objects;
-  // nonmoving:
-  struct block_descr *free_ptr[SIZECLASS_MAX - SIZECLASS_MIN];
-};
-
-#define NUM_FREE_LISTS (CLUSTER_SHIFT - BLOCK_SHIFT)
-struct rapid_memory {
-  struct rapid_generation generations[NUM_GENERATIONS];
-
-  /**
-   * Store block groups by log2(num_blocks)
-   * free_list[n] contains block groups where 2^n <= num_blocks < 2^(n+1)
-   * So for 1MiB-sized clusters each containing 256 4KiB-sized blocks, we end
-   * up with 8 free_lists, the largest one free_list[7] containing all free
-   * block groups of 128 - 255 blocks.
-   */
-  struct block_descr *free_list[NUM_FREE_LISTS];
-
-  hashset_t all_clusters;
-};
-
-static struct rapid_memory rapid_mem;
+struct rapid_memory rapid_mem;
 
 static pthread_mutex_t rapid_memory_mutex;
 
@@ -166,6 +131,13 @@ void free_block_group(void *start) {
   struct block_descr *bdesc = get_block_descr(start);
   assert(bdesc->free);
   assert(bdesc->num_blocks);
+
+  if (bdesc->num_blocks > CLUSTER_MAX_BLOCKS) {
+    memset(bdesc->start, 0, BLOCK_SIZE * bdesc->num_blocks);
+    fprintf(stderr, "NOT IMPLEMENTED: free oversized allocation\n");
+    return;
+  }
+
   // TODO: is there something else, that needs to be done?
   add_to_freelist(start);
 }
@@ -267,10 +239,16 @@ void *alloc_block_group(size_t num_blocks) {
 
 void *
 alloc_large_obj(size_t generation_number, uint64_t size) {
-  uint64_t required_blocks = size / BLOCK_SIZE;
+  uint64_t required_blocks = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
   void *data = alloc_block_group(required_blocks);
   struct block_descr *bdescr = get_block_descr(data);
   bdescr->link = rapid_mem.generations[generation_number].large_objects;
+  if (bdescr->link) {
+    assert(!bdescr->link->back);
+    bdescr->link->back = bdescr;
+  }
+  bdescr->back = NULL;
+  bdescr->flags = BLOCKDESCR_FLAG_LARGE_OBJECT;
   rapid_mem.generations[generation_number].large_objects = bdescr;
 
   return data;

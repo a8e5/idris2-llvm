@@ -48,6 +48,7 @@ struct Idris_TSO_t {
 
   struct block_descr *nurseryHead; ///< first nursery block
   struct block_descr *nurseryCur; ///< current nursery block
+  struct block_descr *nurseryScavenge; ///< next nursery block to scavenge
 
   struct Idris_GC_stats gc_stats;
 
