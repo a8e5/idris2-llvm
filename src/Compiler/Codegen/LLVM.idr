@@ -97,6 +97,7 @@ compile defs tmpDir outputDir term outfile = do
     ]
   let gcPassFlags = if (gc == Statepoint) then ["-rewrite-statepoints-for-gc"] else []
   let gcLDFlags = if (gc == BDW) then ["-lgc"] else []
+  let clangDebugFlags = if debug then ["-g"] else []
 
   coreLift_ $ writeIR allFunctions support outputFileName opts
 
@@ -104,7 +105,7 @@ compile defs tmpDir outputDir term outfile = do
   coreLift $ do
     runShell $ ["opt", outputFileName, "-load-pass-plugin=" ++ rapidLLVMPlugin, "-load=" ++ rapidLLVMPlugin] ++ optFlags ++ gcPassFlags ++ lateTransformFlags ++ ["-o=" ++ bcFileName]
     runShell ["llc", "--frame-pointer=all", "-tailcallopt", "--filetype=obj", "-o=" ++ objectFileName, bcFileName]
-    runShell $ ["clang", "-o", binaryFileName, objectFileName, runtime, platformLib, "-L/usr/local/lib", "-lm", "-lgmp"] ++ gcLDFlags
+    runShell $ ["clang"] ++ clangDebugFlags ++ ["-o", binaryFileName, objectFileName, runtime, platformLib, "-L/usr/local/lib", "-lm", "-lgmp"] ++ gcLDFlags
 
     pure ()
 
