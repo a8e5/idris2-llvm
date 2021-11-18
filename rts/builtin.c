@@ -720,7 +720,7 @@ ObjPtr rapid_fast_pack(Idris_TSO *base, ObjPtr charListObj) {
   while (OBJ_TAG(cursor) == TAG_LIST_CONS) {
     assert(OBJ_TYPE(cursor) == OBJ_TYPE_CON_NO_ARGS);
     strLength += 1;
-    cursor = OBJ_PROJECT(cursor, 1);
+    cursor = OBJ_GET_SLOT(cursor, 1);
   }
 
   ObjPtr newStr = rapid_C_allocate(base, HEADER_SIZE + strLength);
@@ -732,11 +732,11 @@ ObjPtr rapid_fast_pack(Idris_TSO *base, ObjPtr charListObj) {
   while (OBJ_TAG(cursor) == TAG_LIST_CONS) {
     assert(OBJ_TYPE(cursor) == OBJ_TYPE_CON_NO_ARGS);
     assert(strPos < strLength);
-    ObjPtr charObj = OBJ_PROJECT(cursor, 0);
+    ObjPtr charObj = OBJ_GET_SLOT(cursor, 0);
     assert(OBJ_TYPE(charObj) == OBJ_TYPE_CHAR);
     dst[strPos] = OBJ_SIZE(charObj) & 0xff;
     strPos += 1;
-    cursor = OBJ_PROJECT(cursor, 1);
+    cursor = OBJ_GET_SLOT(cursor, 1);
   }
   return newStr;
 }
@@ -746,11 +746,11 @@ ObjPtr rapid_fast_append(Idris_TSO *base, ObjPtr strListObj) {
   ObjPtr cursor = strListObj;
   while (OBJ_TAG(cursor) == TAG_LIST_CONS) {
     assert(OBJ_TYPE(cursor) == OBJ_TYPE_CON_NO_ARGS);
-    ObjPtr partObj = OBJ_PROJECT(cursor, 0);
+    ObjPtr partObj = OBJ_GET_SLOT(cursor, 0);
     assert(OBJ_TYPE(partObj) == OBJ_TYPE_STRING);
     strLength += OBJ_SIZE(partObj);
 
-    cursor = OBJ_PROJECT(cursor, 1);
+    cursor = OBJ_GET_SLOT(cursor, 1);
   }
 
   if (strLength > 0xffffffffull) {
@@ -764,7 +764,7 @@ ObjPtr rapid_fast_append(Idris_TSO *base, ObjPtr strListObj) {
   char *dst = OBJ_PAYLOAD(newStr);
   cursor = strListObj;
   while (OBJ_TAG(cursor) == TAG_LIST_CONS) {
-    ObjPtr partObj = OBJ_PROJECT(cursor, 0);
+    ObjPtr partObj = OBJ_GET_SLOT(cursor, 0);
     assert(OBJ_TYPE(partObj) == OBJ_TYPE_STRING);
     int32_t partLength = OBJ_SIZE(partObj);
 
@@ -774,7 +774,7 @@ ObjPtr rapid_fast_append(Idris_TSO *base, ObjPtr strListObj) {
     }
 
     strPos += partLength;
-    cursor = OBJ_PROJECT(cursor, 1);
+    cursor = OBJ_GET_SLOT(cursor, 1);
   }
   return newStr;
 }

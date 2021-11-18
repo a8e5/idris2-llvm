@@ -62,10 +62,6 @@ static inline uint32_t OBJ_TAG(ObjPtr p) {
   return ((p->hdr) & 0xffffffff);
 }
 
-static inline ObjPtr OBJ_PROJECT(ObjPtr p, int32_t pos) {
-  return ((ObjPtr*)&p->data)[pos];
-}
-
 static inline void OBJ_PUT_SLOT(ObjPtr p, int32_t pos, ObjPtr d) {
   ((ObjPtr*)&p->data)[pos] = d;
 }
