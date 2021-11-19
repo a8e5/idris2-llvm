@@ -833,6 +833,14 @@ showConstant (BI i) = "(BI " ++ show i ++ ")"
 showConstant (Str i) = "(Str " ++ show i ++ ")"
 showConstant (Ch i) = "(Ch " ++ show i ++ ")"
 showConstant (Db i) = "(Db " ++ show i ++ ")"
+showConstant (B8 i)  = "(B8 " ++ show i ++ ")"
+showConstant (B16 i) = "(B16 " ++ show i ++ ")"
+showConstant (B32 i) = "(B32 " ++ show i ++ ")"
+showConstant (B64 i) = "(B64 " ++ show i ++ ")"
+showConstant (I8 i)  = "(I8 " ++ show i ++ ")"
+showConstant (I16 i) = "(I16 " ++ show i ++ ")"
+showConstant (I32 i) = "(I32 " ++ show i ++ ")"
+showConstant (I64 i) = "(I64 " ++ show i ++ ")"
 showConstant other = "(CONST " ++ show other ++ ")"
 
 makeConstCaseLabel : String -> (Constant, a) -> String
@@ -872,13 +880,14 @@ prepareArg RVal = do
   addError "cannot use rval as call arg"
   pure "error"
 
-findConstCaseType : List (Constant, List VMInst) -> Constant
-findConstCaseType [] = assert_total $ idris_crash "empty const case"
-findConstCaseType ((I _,_)::_) = IntType
-findConstCaseType ((BI _,_)::_) = IntegerType
-findConstCaseType ((Str _,_)::_) = StringType
-findConstCaseType ((Ch _,_)::_) = CharType
-findConstCaseType t = assert_total $ idris_crash $ "unknwon const case type" ++ show t
+total
+findConstCaseType : List (Constant, List VMInst) -> Either String Constant
+findConstCaseType [] = Left "empty const case"
+findConstCaseType ((I _,_)::_) = pure IntType
+findConstCaseType ((BI _,_)::_) = pure IntegerType
+findConstCaseType ((Str _,_)::_) = pure StringType
+findConstCaseType ((Ch _,_)::_) = pure CharType
+findConstCaseType ((c,_)::_) = Left $ "unknown const case type: " ++ (showConstant c)
 
 compareStr : IRValue IRObjPtr -> IRValue IRObjPtr -> Codegen (IRValue I1)
 compareStr obj1 obj2 = do
@@ -2488,11 +2497,12 @@ getInstIR i (MKCONSTANT r WorldVal) = do
 getInstIR i (MKCONSTANT r (Str s)) = store !(mkStr i s) (reg2val r)
 
 getInstIR i (CONSTCASE r alts def) = case findConstCaseType alts of
-                                          IntType => getInstForConstCaseInt i r alts def
-                                          IntegerType => getInstForConstCaseInteger i r alts def
-                                          StringType => getInstForConstCaseString i r alts def
-                                          CharType => getInstForConstCaseChar i r alts def
-                                          t => addError "unknwon constcase type"
+                                          Right IntType => getInstForConstCaseInt i r alts def
+                                          Right IntegerType => getInstForConstCaseInteger i r alts def
+                                          Right StringType => getInstForConstCaseString i r alts def
+                                          Right CharType => getInstForConstCaseChar i r alts def
+                                          Right t => addError ("constcase error, unhandled type: " ++ show t)
+                                          Left err => addError ("constcase error: " ++ err)
 
 getInstIR {conNames} i (CASE r alts def) =
   do let def' = fromMaybe [(ERROR $ "no default in CASE")] def
