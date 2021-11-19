@@ -2127,7 +2127,7 @@ getInstIR i (OP r (Cast IntType CharType) [r1]) = do
   putObjectHeader newCharObj hdr
   store newCharObj (reg2val r)
 getInstIR i (OP r (Cast IntegerType CharType) [r1]) = do
-  ival <- mkTrunc !(unboxInt (reg2val r1))
+  ival <- mkTrunc !(unboxIntegerSigned !(load (reg2val r1)))
   truncatedVal <- mkAnd (Const I32 0x1fffff) ival
   newObj <- cgMkChar truncatedVal
   store newObj (reg2val r)
