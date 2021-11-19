@@ -2045,18 +2045,6 @@ getInstIR i (OP r (Cast StringType DoubleType) [r1]) = do
   newDouble <- cgMkDouble parsedVal
   store newDouble (reg2val r)
 
-getInstIR i (OP r (Cast CharType IntegerType) [r1]) = do
-  charHdr <- getObjectHeader !(load (reg2val r1))
-  charVal <- mkAnd charHdr (ConstI64 0x1fffff)
-  newInt <- cgMkIntegerSigned charVal
-  store newInt (reg2val r)
-
-getInstIR i (OP r (Cast CharType IntType) [r1]) = do
-  charHdr <- getObjectHeader !(load (reg2val r1))
-  charVal <- mkAnd charHdr (ConstI64 0x1fffff)
-  newInt <- cgMkInt charVal
-  store newInt (reg2val r)
-
 getInstIR i (OP r (Cast Bits8Type IntegerType) [r1]) = do
   ival <- unboxInt (reg2val r1)
   newInt <- cgMkIntegerSigned ival
@@ -2110,6 +2098,11 @@ getInstIR i (OP r (Cast CharType StringType) [r1]) = do
   charLength <- call {t=I32} "ccc" "@utf8_encode1" [toIR newStrPayload1, toIR charVal]
   putObjectHeader newStr !(mkHeader OBJECT_TYPE_ID_STR charLength)
   store newStr (reg2val r)
+
+getInstIR i (OP r (Cast CharType toType) [r1]) = do
+  charVal <- unboxChar' !(load (reg2val r1))
+  newInt <- genericIntBox toType !(mkZext charVal)
+  store newInt (reg2val r)
 
 getInstIR i (OP r (Cast IntType IntegerType) [r1]) = do
   ival <- unboxInt (reg2val r1)
