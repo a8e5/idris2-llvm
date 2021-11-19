@@ -271,11 +271,11 @@ mkZext {to} val = (SSA to) <$> assignSSA ("zext " ++ toIR val ++ " to " ++ show 
 mkSext : {to : IRType} -> IRValue from -> Codegen (IRValue to)
 mkSext {to} val = (SSA to) <$> assignSSA ("sext " ++ toIR val ++ " to " ++ show to)
 
-icmp64 : {t : IRType} -> String -> IRValue t -> IRValue t -> Codegen (IRValue I64)
-icmp64 {t} cond a b = icmp cond a b >>= mkZext {to = I64}
-
 fptosi : {to : IRType} -> IRValue from -> Codegen (IRValue to)
 fptosi {to} val = (SSA to) <$> assignSSA ("fptosi " ++ toIR val ++ " to " ++ show to)
+
+fptoui : {to : IRType} -> IRValue from -> Codegen (IRValue to)
+fptoui {to} val = (SSA to) <$> assignSSA ("fptoui " ++ toIR val ++ " to " ++ show to)
 
 sitofp : {to : IRType} -> IRValue from -> Codegen (IRValue to)
 sitofp {to} val = (SSA to) <$> assignSSA ("sitofp " ++ toIR val ++ " to " ++ show to)
@@ -1165,35 +1165,42 @@ Show IntKind where
   show (Signed (P x)) = "(Signed (P " ++ show x ++ "))"
   show (Unsigned x) = "(Unsigned " ++ show x ++ ")"
 
-bits64Compare : (IRValue I64 -> IRValue I64 -> Codegen (IRValue I64)) -> Reg -> Reg -> Reg -> Codegen ()
+bits64Compare : String -> Reg -> Reg -> Reg -> Codegen ()
 bits64Compare op dest a b = do
   i1 <- unboxBits64 !(load (reg2val a))
   i2 <- unboxBits64 !(load (reg2val b))
-  result <- op i1 i2
+  result <- mkZext !(icmp op i1 i2)
   obj <- cgMkInt result
   store obj (reg2val dest)
 
-intCompare : (IRValue I64 -> IRValue I64 -> Codegen (IRValue I64)) -> Reg -> Reg -> Reg -> Codegen ()
-intCompare op dest a b = do
-  i1 <- unboxInt (reg2val a)
-  i2 <- unboxInt (reg2val b)
-  result <- op i1 i2
+typeFromBits : Int -> IRType
+typeFromBits 8 = I8
+typeFromBits 16 = I16
+typeFromBits 32 = I32
+typeFromBits _ = I64
+
+intCompare : Int -> String -> Reg -> Reg -> Reg -> Codegen ()
+intCompare bits op dest a b = do
+  let t = typeFromBits bits
+  i1 <- mkTrunc {to=t} !(unboxInt (reg2val a))
+  i2 <- mkTrunc !(unboxInt (reg2val b))
+  result <- mkZext !(icmp op i1 i2)
   obj <- cgMkInt result
   store obj (reg2val dest)
 
 intCompare' : Maybe IntKind ->
-              (unsignedOp : IRValue I64 -> IRValue I64 -> Codegen (IRValue I64)) ->
-              (signedOp : IRValue I64 -> IRValue I64 -> Codegen (IRValue I64)) ->
+              (unsignedOp : String) ->
+              (signedOp : String) ->
               (dest : Reg) -> Reg -> Reg ->
               Codegen ()
 intCompare' (Just (Unsigned bits)) unsignedOp _ dest a b = do
   if (bits == 64)
      then bits64Compare unsignedOp dest a b
-     else intCompare unsignedOp dest a b
+     else intCompare bits unsignedOp dest a b
 intCompare' (Just (Signed (P bits))) _ signedOp dest a b = do
   if (bits == 64)
      then bits64Compare signedOp dest a b
-     else intCompare signedOp dest a b
+     else intCompare bits signedOp dest a b
 intCompare' (Just k) _ _ _ _ _ = addError ("invalid IntKind for binary operator: " ++ show k)
 intCompare' (Nothing) _ _ _ _ _ = addError ("binary operator used with no IntKind")
 
@@ -1236,22 +1243,41 @@ genericIntUnbox ty obj with (intKind ty)
     addError ("invalid int unbox: " ++ show ty)
     pure (Const I64 0)
 
+genericIntBox : Constant -> IRValue I64 -> Codegen (IRValue IRObjPtr)
+genericIntBox IntegerType ival = cgMkIntegerSigned ival
+genericIntBox IntType ival = cgMkInt ival
+genericIntBox ty ival with (intKind ty)
+  genericIntBox _ ival | Just (Unsigned 64) = cgMkBits64 ival
+  genericIntBox _ ival | Just (Unsigned bits) = do
+    let mask = intMask bits
+    truncatedVal <- mkAnd (Const I64 mask) ival
+    cgMkInt truncatedVal
+  genericIntBox _ ival | Just (Signed (P 64)) = cgMkBits64 ival
+  genericIntBox _ ival | Just (Signed (P bits)) = do
+    let mask = intMask bits
+    truncatedVal <- mkAnd (Const I64 mask) ival
+    cgMkInt truncatedVal
+  genericIntBox ty _ | _ = do
+    addError ("invalid int box: " ++ show ty)
+    cgMkInt (Const I64 0)
+
 genericCast : Constant -> Constant -> Reg -> Reg -> Codegen ()
 genericCast fromType toType dest src with (intKind fromType, intKind toType)
-  genericCast fromType CharType dest src | (Just (Unsigned _), _) = do
+  -- to Char
+  genericCast fromType CharType dest src | (Just _, _) = do
     raw <- genericIntUnbox fromType !(load (reg2val src))
     ival <- mkTrunc {to=I32} raw
-    truncatedVal <- mkAnd (Const I32 0x1fffff) ival
-    newObj <- cgMkChar truncatedVal
-    store newObj (reg2val dest)
-  genericCast fromType CharType dest src | (Just (Signed (P _)), _) = do
-    raw <- genericIntUnbox fromType !(load (reg2val src))
-    ival <- mkTrunc {to=I32} raw
-    isNeg <- icmp "slt" ival (Const I32 0)
-    truncatedVal <- mkAnd (Const I32 0x1fffff) ival
-    codepoint <- mkSelect isNeg (Const I32 0) truncatedVal
+    -- this also helps to rule out negative values, should fromType be signed
+    surrogateUpperBound <- icmp "ult" ival (Const I32 0xe000)
+    surrogateLowerBound <- icmp "ugt" ival (Const I32 0xd7ff)
+    isSurrogate <- mkAnd surrogateLowerBound surrogateUpperBound
+    tooHigh <- icmp "ugt" ival (Const I32 0x10ffff)
+    isInvalid <- mkOr tooHigh isSurrogate
+    codepoint <- mkSelect isInvalid (Const I32 0) ival
     newObj <- cgMkChar codepoint
     store newObj (reg2val dest)
+
+  -- to Double
   genericCast fromType DoubleType dest src | (Just (Unsigned _), _) = do
     ival <- genericIntUnbox fromType !(load (reg2val src))
     newObj <- cgMkDouble !(uitofp ival)
@@ -1260,6 +1286,18 @@ genericCast fromType toType dest src with (intKind fromType, intKind toType)
     ival <- genericIntUnbox fromType !(load (reg2val src))
     newObj <- cgMkDouble !(sitofp ival)
     store newObj (reg2val dest)
+
+  -- from Double
+  genericCast DoubleType toType dest src | (_, Just (Unsigned _)) = do
+    f1 <- unboxDouble !(load (reg2val src))
+    newObj <- genericIntBox toType !(fptoui f1)
+    store newObj (reg2val dest)
+  genericCast DoubleType toType dest src | (_, Just (Signed (P _))) = do
+    f1 <- unboxDouble !(load (reg2val src))
+    newObj <- genericIntBox toType !(fptosi f1)
+    store newObj (reg2val dest)
+
+  -- to String
   genericCast fromType StringType dest src | (Just _, _) = do
     ival <- genericIntUnbox fromType !(load (reg2val src))
     -- max size of 2^64 = 20 + (optional "-" prefix) + NUL byte (from snprintf)
@@ -1269,6 +1307,35 @@ genericCast fromType toType dest src with (intKind fromType, intKind toType)
     newHeader <- mkOr (ConstI64 $ header OBJECT_TYPE_ID_STR) length
     putObjectHeader newStr newHeader
     store newStr (reg2val dest)
+
+  -- from String
+  genericCast StringType toType dest src | (_, Just _) = do
+    strObj <- load (reg2val src)
+    parsedVal <- SSA I64 <$> assignSSA ("  call ccc i64 @idris_rts_str_to_int(" ++ toIR strObj ++ ")")
+    newObj <- genericIntBox toType parsedVal
+    store newObj (reg2val dest)
+
+  -- from generic int to generic int
+  genericCast fromType IntType dest src | (Just _, _) = do
+    ival <- genericIntUnbox fromType !(load (reg2val src))
+    newObj <- cgMkInt ival
+    store newObj (reg2val dest)
+  genericCast fromType toType dest src | (Just _, Just (Unsigned bits)) = do
+    ival <- genericIntUnbox fromType !(load (reg2val src))
+    newObj <- if bits == 64
+                 then cgMkBits64 ival
+                 else do let mask = intMask bits
+                         truncatedVal <- mkAnd (Const I64 mask) ival
+                         cgMkInt truncatedVal
+    store newObj (reg2val dest)
+  genericCast fromType toType dest src | (Just _, Just (Signed (P bits))) = do
+    ival <- genericIntUnbox fromType !(load (reg2val src))
+    newObj <- if bits == 64
+                 then cgMkBits64 ival
+                 else do let mask = intMask bits
+                         truncatedVal <- mkAnd (Const I64 mask) ival
+                         cgMkInt truncatedVal
+    store newObj (reg2val dest)
 
   genericCast fromType toType dest src | _ = do
     addError ("cast not implemented: " ++ (show fromType) ++ " -> " ++ (show toType))
@@ -1851,11 +1918,6 @@ getInstIR i (OP r (Cast DoubleType StringType) [r1]) = do
   newHeader <- mkOr (ConstI64 $ header OBJECT_TYPE_ID_STR) length
   putObjectHeader newStr newHeader
   store newStr (reg2val r)
-getInstIR i (OP r (Cast DoubleType IntType) [r1]) = do
-  fval <- unboxFloat64 (reg2val r1)
-  intval <- fptosi fval
-  newInt <- cgMkInt intval
-  store newInt (reg2val r)
 getInstIR i (OP r (Cast DoubleType IntegerType) [r1]) = do
   floatObj <- load (reg2val r1)
   floatBitsAsI64 <- getObjectSlot {t=I64} floatObj 0
@@ -1977,11 +2039,6 @@ getInstIR i (OP r (Cast StringType IntegerType) [r1]) = do
   store newObj (reg2val r)
 
 
-getInstIR i (OP r (Cast StringType IntType) [r1]) = do
-  strObj <- load (reg2val r1)
-  parsedVal <- SSA I64 <$> assignSSA ("  call ccc i64 @idris_rts_str_to_int(" ++ toIR strObj ++ ")")
-  newInt <- cgMkInt parsedVal
-  store newInt (reg2val r)
 getInstIR i (OP r (Cast StringType DoubleType) [r1]) = do
   strObj <- load (reg2val r1)
   parsedVal <- SSA F64 <$> assignSSA ("  call ccc double @idris_rts_str_to_double(" ++ toIR strObj ++ ")")
@@ -2000,135 +2057,18 @@ getInstIR i (OP r (Cast CharType IntType) [r1]) = do
   newInt <- cgMkInt charVal
   store newInt (reg2val r)
 
-getInstIR i (OP r (Cast IntegerType Bits8Type) [r1]) = do
-  ival <- unboxIntegerUnsigned !(load (reg2val r1))
-  truncatedVal <- mkAnd (Const I64 0xff) ival
-  newObj <- cgMkInt truncatedVal
-  store newObj (reg2val r)
-getInstIR i (OP r (Cast IntType Bits8Type) [r1]) = do
-  ival <- unboxInt (reg2val r1)
-  truncatedVal <- mkAnd (Const I64 0xff) ival
-  newObj <- cgMkInt truncatedVal
-  store newObj (reg2val r)
-getInstIR i (OP r (Cast IntegerType Bits16Type) [r1]) = do
-  ival <- unboxIntegerUnsigned !(load (reg2val r1))
-  truncatedVal <- mkAnd (Const I64 0xffff) ival
-  newObj <- cgMkInt truncatedVal
-  store newObj (reg2val r)
-getInstIR i (OP r (Cast IntType Bits16Type) [r1]) = do
-  ival <- unboxInt (reg2val r1)
-  truncatedVal <- mkAnd (Const I64 0xffff) ival
-  newObj <- cgMkInt truncatedVal
-  store newObj (reg2val r)
-getInstIR i (OP r (Cast IntegerType Bits32Type) [r1]) = do
-  ival <- unboxIntegerUnsigned !(load (reg2val r1))
-  truncatedVal <- mkAnd (Const I64 0xffffffff) ival
-  newObj <- cgMkInt truncatedVal
-  store newObj (reg2val r)
-getInstIR i (OP r (Cast IntType Bits32Type) [r1]) = do
-  ival <- unboxInt (reg2val r1)
-  truncatedVal <- mkAnd (Const I64 0xffffffff) ival
-  newObj <- cgMkInt truncatedVal
-  store newObj (reg2val r)
-getInstIR i (OP r (Cast IntegerType Bits64Type) [r1]) = do
-  ival <- unboxIntegerUnsigned !(load (reg2val r1))
-  newObj <- cgMkBits64 ival
-  store newObj (reg2val r)
-
-getInstIR i (OP r (Cast IntegerType Int8Type) [r1]) = do
-  ival <- unboxIntegerSigned !(load (reg2val r1))
-  truncatedVal <- mkAnd (Const I64 0xff) ival
-  newObj <- cgMkInt truncatedVal
-  store newObj (reg2val r)
-getInstIR i (OP r (Cast IntegerType Int16Type) [r1]) = do
-  ival <- unboxIntegerSigned !(load (reg2val r1))
-  truncatedVal <- mkAnd (Const I64 0xffff) ival
-  newObj <- cgMkInt truncatedVal
-  store newObj (reg2val r)
-getInstIR i (OP r (Cast IntegerType Int32Type) [r1]) = do
-  ival <- unboxIntegerSigned !(load (reg2val r1))
-  truncatedVal <- mkAnd (Const I64 0xffffffff) ival
-  newObj <- cgMkInt truncatedVal
-  store newObj (reg2val r)
-getInstIR i (OP r (Cast IntegerType Int64Type) [r1]) = do
-  ival <- unboxIntegerSigned !(load (reg2val r1))
-  newObj <- cgMkBits64 ival
-  store newObj (reg2val r)
-
-getInstIR i (OP r (Cast IntType Bits64Type) [r1]) = do
-  newObj <- intToBits64 (reg2val r1)
-  store newObj (reg2val r)
-
-
-getInstIR i (OP r (Cast Bits8Type Bits16Type) [r1]) = do
-  store !(load (reg2val r1)) (reg2val r)
-getInstIR i (OP r (Cast Bits8Type Bits32Type) [r1]) = do
-  store !(load (reg2val r1)) (reg2val r)
-getInstIR i (OP r (Cast Bits8Type Bits64Type) [r1]) = do
-  newObj <- intToBits64 (reg2val r1)
-  store newObj (reg2val r)
-getInstIR i (OP r (Cast Bits8Type IntType) [r1]) = do
-  store !(load (reg2val r1)) (reg2val r)
 getInstIR i (OP r (Cast Bits8Type IntegerType) [r1]) = do
   ival <- unboxInt (reg2val r1)
   newInt <- cgMkIntegerSigned ival
   store newInt (reg2val r)
-
-getInstIR i (OP r (Cast Bits16Type Bits8Type) [r1]) = do
-  ival <- unboxInt (reg2val r1)
-  truncatedVal <- mkAnd (Const I64 0xff) ival
-  store !(cgMkInt truncatedVal) (reg2val r)
-getInstIR i (OP r (Cast Bits16Type Bits32Type) [r1]) = do
-  store !(load (reg2val r1)) (reg2val r)
-getInstIR i (OP r (Cast Bits16Type Bits64Type) [r1]) = do
-  newObj <- intToBits64 (reg2val r1)
-  store newObj (reg2val r)
-getInstIR i (OP r (Cast Bits16Type IntType) [r1]) = do
-  store !(load (reg2val r1)) (reg2val r)
 getInstIR i (OP r (Cast Bits16Type IntegerType) [r1]) = do
   ival <- unboxInt (reg2val r1)
   newInt <- cgMkIntegerSigned ival
   store newInt (reg2val r)
-
-getInstIR i (OP r (Cast Bits32Type Bits8Type) [r1]) = do
-  ival <- unboxInt (reg2val r1)
-  truncatedVal <- mkAnd (Const I64 0xff) ival
-  store !(cgMkInt truncatedVal) (reg2val r)
-getInstIR i (OP r (Cast Bits32Type Bits16Type) [r1]) = do
-  ival <- unboxInt (reg2val r1)
-  truncatedVal <- mkAnd (Const I64 0xffff) ival
-  store !(cgMkInt truncatedVal) (reg2val r)
-getInstIR i (OP r (Cast Bits32Type Bits64Type) [r1]) = do
-  newObj <- intToBits64 (reg2val r1)
-  store newObj (reg2val r)
-getInstIR i (OP r (Cast Bits32Type IntType) [r1]) = do
-  store !(load (reg2val r1)) (reg2val r)
 getInstIR i (OP r (Cast Bits32Type IntegerType) [r1]) = do
   ival <- unboxInt (reg2val r1)
   newInt <- cgMkIntegerSigned ival
   store newInt (reg2val r)
-
-
-getInstIR i (OP r (Cast Bits64Type Bits8Type) [r1]) = do
-  obj <- load (reg2val r1)
-  ival <- unboxBits64 obj
-  truncatedVal <- mkAnd (Const I64 0xff) ival
-  store !(cgMkInt truncatedVal) (reg2val r)
-getInstIR i (OP r (Cast Bits64Type Bits16Type) [r1]) = do
-  obj <- load (reg2val r1)
-  ival <- unboxBits64 obj
-  truncatedVal <- mkAnd (Const I64 0xffff) ival
-  store !(cgMkInt truncatedVal) (reg2val r)
-getInstIR i (OP r (Cast Bits64Type Bits32Type) [r1]) = do
-  obj <- load (reg2val r1)
-  ival <- unboxBits64 obj
-  truncatedVal <- mkAnd (Const I64 0xffffffff) ival
-  store !(cgMkInt truncatedVal) (reg2val r)
-getInstIR i (OP r (Cast Bits64Type IntType) [r1]) = do
-  obj <- load (reg2val r1)
-  ival <- unboxBits64 obj
-  truncatedVal <- mkAnd (Const I64 0x7fffffffffffffff) ival
-  store !(cgMkInt truncatedVal) (reg2val r)
 getInstIR i (OP r (Cast Bits64Type IntegerType) [r1]) = do
   ival <- unboxBits64 !(load (reg2val r1))
   isZero <- icmp "eq" (Const I64 0) ival
@@ -2171,16 +2111,6 @@ getInstIR i (OP r (Cast CharType StringType) [r1]) = do
   putObjectHeader newStr !(mkHeader OBJECT_TYPE_ID_STR charLength)
   store newStr (reg2val r)
 
-getInstIR i (OP r (Cast IntegerType IntType) [r1]) = do
-  integerObj <- load (reg2val r1)
-  -- get first limb (LSB)
-  isNegative <- icmp "slt" !(getObjectSize integerObj) (Const I32 0)
-  isZero <- icmp "eq" (Const I32 0) !(getObjectSize integerObj)
-  ival <- mkIf (pure isZero) (pure $ Const I64 0) (getObjectSlot {t=I64} integerObj 0)
-  truncated <- mkAnd (Const I64 0x3fffffffffffffff) ival
-  negated <- mkSub (Const I64 0) truncated
-  theInt <- mkSelect isNegative negated truncated
-  store !(cgMkInt theInt) (reg2val r)
 getInstIR i (OP r (Cast IntType IntegerType) [r1]) = do
   ival <- unboxInt (reg2val r1)
   integerObj <- cgMkIntegerSigned ival
@@ -2548,11 +2478,11 @@ getInstIR i (OP r (BXOr ty) [r1, r2]) = boundedIntBinary' (intKind ty) mkXOr mkX
 getInstIR i (OP r (ShiftL ty) [r1, r2]) = boundedIntBinary' (intKind ty) mkShiftL mkShiftL r r1 r2
 getInstIR i (OP r (ShiftR ty) [r1, r2]) = boundedIntBinary' (intKind ty) mkShiftR mkAShiftR r r1 r2
 
-getInstIR i (OP r (LT  ty) [r1, r2]) = intCompare' (intKind ty) (icmp64 "ult") (icmp64 "slt") r r1 r2
-getInstIR i (OP r (LTE ty) [r1, r2]) = intCompare' (intKind ty) (icmp64 "ule") (icmp64 "sle") r r1 r2
-getInstIR i (OP r (EQ  ty) [r1, r2]) = intCompare' (intKind ty) (icmp64 "eq")  (icmp64 "eq")  r r1 r2
-getInstIR i (OP r (GTE ty) [r1, r2]) = intCompare' (intKind ty) (icmp64 "uge") (icmp64 "sge") r r1 r2
-getInstIR i (OP r (GT  ty) [r1, r2]) = intCompare' (intKind ty) (icmp64 "ugt") (icmp64 "sgt") r r1 r2
+getInstIR i (OP r (LT  ty) [r1, r2]) = intCompare' (intKind ty) "ult" "slt" r r1 r2
+getInstIR i (OP r (LTE ty) [r1, r2]) = intCompare' (intKind ty) "ule" "sle" r r1 r2
+getInstIR i (OP r (EQ  ty) [r1, r2]) = intCompare' (intKind ty) "eq"  "eq"  r r1 r2
+getInstIR i (OP r (GTE ty) [r1, r2]) = intCompare' (intKind ty) "uge" "sge" r r1 r2
+getInstIR i (OP r (GT  ty) [r1, r2]) = intCompare' (intKind ty) "ugt" "sgt" r r1 r2
 
 getInstIR i (MKCON r (Left tag) args) = do
   obj <- mkCon tag args
