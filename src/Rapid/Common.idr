@@ -21,7 +21,6 @@ encodeGCFlavourAsInt : GCFlavour -> Int
 encodeGCFlavourAsInt Zero = 1
 encodeGCFlavourAsInt BDW = 2
 encodeGCFlavourAsInt Statepoint = 3
-encodeGCFlavourAsInt _ = 0
 
 public export
 record CompileOpts where
