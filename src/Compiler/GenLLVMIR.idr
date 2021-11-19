@@ -280,6 +280,9 @@ fptosi {to} val = (SSA to) <$> assignSSA ("fptosi " ++ toIR val ++ " to " ++ sho
 sitofp : {to : IRType} -> IRValue from -> Codegen (IRValue to)
 sitofp {to} val = (SSA to) <$> assignSSA ("sitofp " ++ toIR val ++ " to " ++ show to)
 
+uitofp : {to : IRType} -> IRValue from -> Codegen (IRValue to)
+uitofp {to} val = (SSA to) <$> assignSSA ("uitofp " ++ toIR val ++ " to " ++ show to)
+
 phi : {t : IRType} -> List (IRValue t, IRLabel) -> Codegen (IRValue t)
 phi xs = (SSA t) <$> assignSSA ("phi " ++ show t ++ " " ++ showSep ", " (map getEdge xs)) where
   getEdge : (IRValue t, IRLabel) -> String
@@ -1255,8 +1258,17 @@ genericCast fromType toType dest src with (intKind fromType, intKind toType)
     codepoint <- mkSelect isNeg (Const I32 0) truncatedVal
     newObj <- cgMkChar codepoint
     store newObj (reg2val dest)
+  genericCast fromType DoubleType dest src | (Just (Unsigned _), _) = do
+    ival <- genericUIntUnbox fromType !(load (reg2val src))
+    newObj <- cgMkDouble !(uitofp ival)
+    store newObj (reg2val dest)
+  genericCast fromType DoubleType dest src | (Just (Signed _), _) = do
+    ival <- genericIntUnbox fromType !(load (reg2val src))
+    newObj <- cgMkDouble !(sitofp ival)
+    store newObj (reg2val dest)
   genericCast fromType toType dest src | _ = do
     addError ("cast not implemented: " ++ (show fromType) ++ " -> " ++ (show toType))
+
 
 doubleCmp : String -> Reg -> Reg -> Reg -> Codegen ()
 doubleCmp op dest a b = do
@@ -2503,11 +2515,6 @@ getInstIR i (OP r (LTE IntegerType) [r1, r2]) = do
   obj <- cgMkInt !(mkZext {to=I64} cmpResult)
 
   store obj (reg2val r)
-
-getInstIR i (OP r (Cast IntType DoubleType) [r1]) = do
-  ival <- unboxInt (reg2val r1)
-  newObj <- cgMkDouble !(sitofp ival)
-  store newObj (reg2val r)
 
 getInstIR i (OP r (Cast fromType toType) [r1]) = genericCast fromType toType r r1
 
