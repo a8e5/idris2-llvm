@@ -1228,29 +1228,23 @@ genericIntUnbox : Constant -> IRValue IRObjPtr -> Codegen (IRValue I64)
 genericIntUnbox IntegerType obj = unboxIntegerSigned obj
 genericIntUnbox IntType obj = unboxInt' obj
 genericIntUnbox ty obj with (intKind ty)
+  genericIntUnbox _ obj | Just (Unsigned 64) = unboxBits64 obj
+  genericIntUnbox _ obj | Just (Unsigned bits) = unboxInt' obj
   genericIntUnbox _ obj | Just (Signed (P 64)) = unboxBits64 obj
   genericIntUnbox _ obj | Just (Signed (P bits)) = unboxIntSigned' bits obj
   genericIntUnbox ty _ | _ = do
     addError ("invalid int unbox: " ++ show ty)
     pure (Const I64 0)
 
-genericUIntUnbox : Constant -> IRValue IRObjPtr -> Codegen (IRValue I64)
-genericUIntUnbox ty obj with (intKind ty)
-  genericUIntUnbox _ obj | Just (Unsigned 64) = unboxBits64 obj
-  genericUIntUnbox _ obj | Just (Unsigned bits) = unboxInt' obj
-  genericUIntUnbox ty _ | _ = do
-    addError ("invalid uint unbox: " ++ show ty)
-    pure (Const I64 0)
-
 genericCast : Constant -> Constant -> Reg -> Reg -> Codegen ()
 genericCast fromType toType dest src with (intKind fromType, intKind toType)
   genericCast fromType CharType dest src | (Just (Unsigned _), _) = do
-    raw <- genericUIntUnbox fromType !(load (reg2val src))
+    raw <- genericIntUnbox fromType !(load (reg2val src))
     ival <- mkTrunc {to=I32} raw
     truncatedVal <- mkAnd (Const I32 0x1fffff) ival
     newObj <- cgMkChar truncatedVal
     store newObj (reg2val dest)
-  genericCast fromType CharType dest src | (Just (Signed _), _) = do
+  genericCast fromType CharType dest src | (Just (Signed (P _)), _) = do
     raw <- genericIntUnbox fromType !(load (reg2val src))
     ival <- mkTrunc {to=I32} raw
     isNeg <- icmp "slt" ival (Const I32 0)
@@ -1259,13 +1253,23 @@ genericCast fromType toType dest src with (intKind fromType, intKind toType)
     newObj <- cgMkChar codepoint
     store newObj (reg2val dest)
   genericCast fromType DoubleType dest src | (Just (Unsigned _), _) = do
-    ival <- genericUIntUnbox fromType !(load (reg2val src))
+    ival <- genericIntUnbox fromType !(load (reg2val src))
     newObj <- cgMkDouble !(uitofp ival)
     store newObj (reg2val dest)
-  genericCast fromType DoubleType dest src | (Just (Signed _), _) = do
+  genericCast fromType DoubleType dest src | (Just (Signed (P _)), _) = do
     ival <- genericIntUnbox fromType !(load (reg2val src))
     newObj <- cgMkDouble !(sitofp ival)
     store newObj (reg2val dest)
+  genericCast fromType StringType dest src | (Just _, _) = do
+    ival <- genericIntUnbox fromType !(load (reg2val src))
+    -- max size of 2^64 = 20 + (optional "-" prefix) + NUL byte (from snprintf)
+    newStr <- dynamicAllocate (ConstI64 24)
+    strPayload <- getObjectPayloadAddr {t=I8} newStr
+    length <- (SSA I64) <$> assignSSA ("call ccc i64 @idris_rts_int_to_str(" ++ toIR strPayload ++ ", " ++ toIR ival ++ ")")
+    newHeader <- mkOr (ConstI64 $ header OBJECT_TYPE_ID_STR) length
+    putObjectHeader newStr newHeader
+    store newStr (reg2val dest)
+
   genericCast fromType toType dest src | _ = do
     addError ("cast not implemented: " ++ (show fromType) ++ " -> " ++ (show toType))
 
@@ -1821,9 +1825,6 @@ getInstIR i (OP r (Cast IntegerType StringType) [r1]) = do
       store newStr (reg2val r)
     )
 
-getInstIR i (OP r (Cast Bits8Type StringType) [r1]) = getInstIR i (OP r (Cast IntType StringType) [r1])
-getInstIR i (OP r (Cast Bits16Type StringType) [r1]) = getInstIR i (OP r (Cast IntType StringType) [r1])
-getInstIR i (OP r (Cast Bits32Type StringType) [r1]) = getInstIR i (OP r (Cast IntType StringType) [r1])
 getInstIR i (OP r (Cast Bits64Type StringType) [r1]) = do
   obj <- load (reg2val r1)
   theBits <- unboxBits64 obj
@@ -1832,17 +1833,6 @@ getInstIR i (OP r (Cast Bits64Type StringType) [r1]) = do
   newStr <- dynamicAllocate (ConstI64 24)
   strPayload <- getObjectPayloadAddr {t=I8} newStr
   length <- (SSA I64) <$> assignSSA ("call ccc i64 @idris_rts_bits64_to_str(" ++ toIR strPayload ++ ", " ++ toIR theBits ++ ")")
-  newHeader <- mkOr (ConstI64 $ header OBJECT_TYPE_ID_STR) length
-  putObjectHeader newStr newHeader
-  store newStr (reg2val r)
-getInstIR i (OP r (Cast IntType StringType) [r1]) = do
-  theIntObj <- load (reg2val r1)
-  theInt <- unboxInt' theIntObj
-
-  -- max size of 2^64 = 20 + (optional "-" prefix) + NUL byte (from snprintf)
-  newStr <- dynamicAllocate (ConstI64 24)
-  strPayload <- getObjectPayloadAddr {t=I8} newStr
-  length <- (SSA I64) <$> assignSSA ("call ccc i64 @idris_rts_int_to_str(" ++ toIR strPayload ++ ", " ++ toIR theInt ++ ")")
   newHeader <- mkOr (ConstI64 $ header OBJECT_TYPE_ID_STR) length
   putObjectHeader newStr newHeader
   store newStr (reg2val r)
