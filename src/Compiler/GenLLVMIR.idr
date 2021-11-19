@@ -811,14 +811,17 @@ unboxInt' src = SSA I64 <$> assignSSA ("tail call fastcc i64 @llvm.rapid.unboxin
 unboxInt : IRValue (Pointer 0 IRObjPtr) -> Codegen (IRValue I64)
 unboxInt src = unboxInt' !(load src)
 
-unboxIntSigned : Int -> IRValue (Pointer 0 IRObjPtr) -> Codegen (IRValue I64)
-unboxIntSigned 8 src = mkSext =<< (mkTrunc {to=I8} =<< unboxInt' !(load src))
-unboxIntSigned 16 src = mkSext =<< (mkTrunc {to=I16} =<< unboxInt' !(load src))
-unboxIntSigned 32 src = mkSext =<< (mkTrunc {to=I32} =<< unboxInt' !(load src))
-unboxIntSigned bits src = do
+unboxIntSigned' : Int -> IRValue IRObjPtr -> Codegen (IRValue I64)
+unboxIntSigned' 8 src = mkSext =<< (mkTrunc {to=I8} =<< unboxInt' src)
+unboxIntSigned' 16 src = mkSext =<< (mkTrunc {to=I16} =<< unboxInt' src)
+unboxIntSigned' 32 src = mkSext =<< (mkTrunc {to=I32} =<< unboxInt' src)
+unboxIntSigned' bits _ = do
   addError ("not a small int kind: " ++ show bits ++ " bits")
   mkRuntimeCrash 12345 ("not a small int kind: " ++ show bits ++ " bits")
   pure (Const I64 0)
+
+unboxIntSigned : Int -> IRValue (Pointer 0 IRObjPtr) -> Codegen (IRValue I64)
+unboxIntSigned bits reg = unboxIntSigned' bits !(load reg)
 
 unboxFloat64 : IRValue (Pointer 0 IRObjPtr) -> Codegen (IRValue F64)
 unboxFloat64 src = getObjectSlot {t=F64} !(load src) 0
@@ -1217,6 +1220,43 @@ boundedIntBinary' (Just (Signed (P bits))) _ signedOp dest a b = do
   store obj (reg2val dest)
 boundedIntBinary' (Just k) _ _ _ _ _ = addError ("invalid IntKind for binary operator: " ++ show k)
 boundedIntBinary' (Nothing) _ _ _ _ _ = addError ("binary operator used with no IntKind")
+
+genericIntUnbox : Constant -> IRValue IRObjPtr -> Codegen (IRValue I64)
+genericIntUnbox IntegerType obj = unboxIntegerSigned obj
+genericIntUnbox IntType obj = unboxInt' obj
+genericIntUnbox ty obj with (intKind ty)
+  genericIntUnbox _ obj | Just (Signed (P 64)) = unboxBits64 obj
+  genericIntUnbox _ obj | Just (Signed (P bits)) = unboxIntSigned' bits obj
+  genericIntUnbox ty _ | _ = do
+    addError ("invalid int unbox: " ++ show ty)
+    pure (Const I64 0)
+
+genericUIntUnbox : Constant -> IRValue IRObjPtr -> Codegen (IRValue I64)
+genericUIntUnbox ty obj with (intKind ty)
+  genericUIntUnbox _ obj | Just (Unsigned 64) = unboxBits64 obj
+  genericUIntUnbox _ obj | Just (Unsigned bits) = unboxInt' obj
+  genericUIntUnbox ty _ | _ = do
+    addError ("invalid uint unbox: " ++ show ty)
+    pure (Const I64 0)
+
+genericCast : Constant -> Constant -> Reg -> Reg -> Codegen ()
+genericCast fromType toType dest src with (intKind fromType, intKind toType)
+  genericCast fromType CharType dest src | (Just (Unsigned _), _) = do
+    raw <- genericUIntUnbox fromType !(load (reg2val src))
+    ival <- mkTrunc {to=I32} raw
+    truncatedVal <- mkAnd (Const I32 0x1fffff) ival
+    newObj <- cgMkChar truncatedVal
+    store newObj (reg2val dest)
+  genericCast fromType CharType dest src | (Just (Signed _), _) = do
+    raw <- genericIntUnbox fromType !(load (reg2val src))
+    ival <- mkTrunc {to=I32} raw
+    isNeg <- icmp "slt" ival (Const I32 0)
+    truncatedVal <- mkAnd (Const I32 0x1fffff) ival
+    codepoint <- mkSelect isNeg (Const I32 0) truncatedVal
+    newObj <- cgMkChar codepoint
+    store newObj (reg2val dest)
+  genericCast fromType toType dest src | _ = do
+    addError ("cast not implemented: " ++ (show fromType) ++ " -> " ++ (show toType))
 
 doubleCmp : String -> Reg -> Reg -> Reg -> Codegen ()
 doubleCmp op dest a b = do
@@ -2119,19 +2159,6 @@ getInstIR i (OP r (Cast Int64Type IntegerType) [r1]) = do
   newInt <- cgMkIntegerSigned ival
   store newInt (reg2val r)
 
-getInstIR i (OP r (Cast IntType CharType) [r1]) = do
-  ival <- unboxInt (reg2val r1)
-  truncated <- mkAnd (Const I64 0x1fffff) ival
-  newCharObj <- dynamicAllocate (Const I64 0)
-  hdr <- mkOr (truncated) (Const I64 $ header OBJECT_TYPE_ID_CHAR)
-  putObjectHeader newCharObj hdr
-  store newCharObj (reg2val r)
-getInstIR i (OP r (Cast IntegerType CharType) [r1]) = do
-  ival <- mkTrunc !(unboxIntegerSigned !(load (reg2val r1)))
-  truncatedVal <- mkAnd (Const I32 0x1fffff) ival
-  newObj <- cgMkChar truncatedVal
-  store newObj (reg2val r)
-
 getInstIR i (OP r (Cast CharType StringType) [r1]) = do
   o1 <- load (reg2val r1)
   charVal <- unboxChar' o1
@@ -2481,6 +2508,8 @@ getInstIR i (OP r (Cast IntType DoubleType) [r1]) = do
   ival <- unboxInt (reg2val r1)
   newObj <- cgMkDouble !(sitofp ival)
   store newObj (reg2val r)
+
+getInstIR i (OP r (Cast fromType toType) [r1]) = genericCast fromType toType r r1
 
 getInstIR i (OP r (LT  DoubleType) [r1, r2]) = doubleCmp "olt" r r1 r2
 getInstIR i (OP r (LTE DoubleType) [r1, r2]) = doubleCmp "ole" r r1 r2
