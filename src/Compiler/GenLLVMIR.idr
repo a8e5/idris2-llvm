@@ -1123,14 +1123,29 @@ bits64Binary op dest a b = do
   obj <- cgMkBits64 !(op i1 i2)
   store obj (reg2val dest)
 
-boundedIntBinary : Integer -> (IRValue I64 -> IRValue I64 -> Codegen (IRValue I64)) -> Reg -> Reg -> Reg -> Codegen ()
-boundedIntBinary mask op dest a b = do
+intMask : Int -> Integer
+intMask 8 = 0xff
+intMask 16 = 0xffff
+intMask 32 = 0xffffffff
+intMask _ = 0
+
+Show IntKind where
+  show (Signed Unlimited) = "(Signed Unlimited)"
+  show (Signed (P x)) = "(Signed (P " ++ show x ++ "))"
+  show (Unsigned x) = "(Unsigned " ++ show x ++ ")"
+
+boundedIntBinary : (Maybe IntKind) -> (IRValue I64 -> IRValue I64 -> Codegen (IRValue I64)) -> Reg -> Reg -> Reg -> Codegen ()
+boundedIntBinary (Just (Unsigned bits)) op dest a b = do
   i1 <- unboxInt (reg2val a)
   i2 <- unboxInt (reg2val b)
   result <- op i1 i2
+  let mask = intMask bits
+  when (mask == 0) (addError "invalid bitMask for binary op")
   truncatedVal <- mkAnd (Const I64 mask) result
   obj <- cgMkInt truncatedVal
   store obj (reg2val dest)
+boundedIntBinary (Just k) _ _ _ _ = addError ("invalid IntKind for binary operator: " ++ show k)
+boundedIntBinary (Nothing) _ _ _ _ = addError ("binary operator used with no IntKind")
 
 doubleCmp : String -> Reg -> Reg -> Reg -> Codegen ()
 doubleCmp op dest a b = do
@@ -2033,39 +2048,6 @@ getInstIR i (OP r (Cast IntType IntegerType) [r1]) = do
   integerObj <- cgMkIntegerSigned ival
   store integerObj (reg2val r)
 
-getInstIR i (OP r (Add Bits8Type) [r1, r2]) = boundedIntBinary 0xff mkAddNoWrap r r1 r2
-getInstIR i (OP r (Sub Bits8Type) [r1, r2]) = boundedIntBinary 0xff mkSub r r1 r2
-getInstIR i (OP r (Mul Bits8Type) [r1, r2]) = boundedIntBinary 0xff mkMul r r1 r2
-getInstIR i (OP r (Div Bits8Type) [r1, r2]) = boundedIntBinary 0xff mkUDiv r r1 r2
-getInstIR i (OP r (Mod Bits8Type) [r1, r2]) = boundedIntBinary 0xff mkURem r r1 r2
-getInstIR i (OP r (BAnd Bits8Type) [r1, r2]) = boundedIntBinary 0xff mkAnd r r1 r2
-getInstIR i (OP r (BOr Bits8Type) [r1, r2]) = boundedIntBinary 0xff mkOr r r1 r2
-getInstIR i (OP r (BXOr Bits8Type) [r1, r2]) = boundedIntBinary 0xff mkXOr r r1 r2
-getInstIR i (OP r (ShiftL Bits8Type) [r1, r2]) = boundedIntBinary 0xff mkShiftL r r1 r2
-getInstIR i (OP r (ShiftR Bits8Type) [r1, r2]) = boundedIntBinary 0xff mkShiftR r r1 r2
-
-getInstIR i (OP r (Add Bits16Type) [r1, r2]) = boundedIntBinary 0xffff mkAddNoWrap r r1 r2
-getInstIR i (OP r (Sub Bits16Type) [r1, r2]) = boundedIntBinary 0xffff mkSub r r1 r2
-getInstIR i (OP r (Mul Bits16Type) [r1, r2]) = boundedIntBinary 0xffff mkMul r r1 r2
-getInstIR i (OP r (Div Bits16Type) [r1, r2]) = boundedIntBinary 0xffff mkUDiv r r1 r2
-getInstIR i (OP r (Mod Bits16Type) [r1, r2]) = boundedIntBinary 0xffff mkURem r r1 r2
-getInstIR i (OP r (BAnd Bits16Type) [r1, r2]) = boundedIntBinary 0xffff mkAnd r r1 r2
-getInstIR i (OP r (BOr Bits16Type) [r1, r2]) = boundedIntBinary 0xffff mkOr r r1 r2
-getInstIR i (OP r (BXOr Bits16Type) [r1, r2]) = boundedIntBinary 0xffff mkXOr r r1 r2
-getInstIR i (OP r (ShiftL Bits16Type) [r1, r2]) = boundedIntBinary 0xffff mkShiftL r r1 r2
-getInstIR i (OP r (ShiftR Bits16Type) [r1, r2]) = boundedIntBinary 0xffff mkShiftR r r1 r2
-
-getInstIR i (OP r (Add Bits32Type) [r1, r2]) = boundedIntBinary 0xffffffff mkAddNoWrap r r1 r2
-getInstIR i (OP r (Sub Bits32Type) [r1, r2]) = boundedIntBinary 0xffffffff mkSub r r1 r2
-getInstIR i (OP r (Mul Bits32Type) [r1, r2]) = boundedIntBinary 0xffffffff mkMul r r1 r2
-getInstIR i (OP r (Div Bits32Type) [r1, r2]) = boundedIntBinary 0xffffffff mkUDiv r r1 r2
-getInstIR i (OP r (Mod Bits32Type) [r1, r2]) = boundedIntBinary 0xffffffff mkURem r r1 r2
-getInstIR i (OP r (BAnd Bits32Type) [r1, r2]) = boundedIntBinary 0xffffffff mkAnd r r1 r2
-getInstIR i (OP r (BOr Bits32Type) [r1, r2]) = boundedIntBinary 0xffffffff mkOr r r1 r2
-getInstIR i (OP r (BXOr Bits32Type) [r1, r2]) = boundedIntBinary 0xffffffff mkXOr r r1 r2
-getInstIR i (OP r (ShiftL Bits32Type) [r1, r2]) = boundedIntBinary 0xffffffff mkShiftL r r1 r2
-getInstIR i (OP r (ShiftR Bits32Type) [r1, r2]) = boundedIntBinary 0xffffffff mkShiftR r r1 r2
-
 getInstIR i (OP r (Add Bits64Type) [r1, r2]) = bits64Binary mkAdd r r1 r2
 getInstIR i (OP r (Sub Bits64Type) [r1, r2]) = bits64Binary mkSub r r1 r2
 getInstIR i (OP r (Mul Bits64Type) [r1, r2]) = bits64Binary mkMul r r1 r2
@@ -2077,7 +2059,7 @@ getInstIR i (OP r (BXOr Bits64Type) [r1, r2]) = bits64Binary mkXOr r r1 r2
 getInstIR i (OP r (ShiftL Bits64Type) [r1, r2]) = bits64Binary mkShiftL r r1 r2
 getInstIR i (OP r (ShiftR Bits64Type) [r1, r2]) = bits64Binary mkShiftR r r1 r2
 
-getInstIR i (OP r (Add IntType) [r1, r2]) = boundedIntBinary 0x7fffffffffffffff mkAdd r r1 r2
+getInstIR i (OP r (Add IntType) [r1, r2]) = intBinary mkAdd r r1 r2
 getInstIR i (OP r (Sub IntType) [r1, r2]) = intBinary mkSub r r1 r2
 getInstIR i (OP r (Mul IntType) [r1, r2]) = intBinary mkMul r r1 r2
 getInstIR i (OP r (Div IntType) [r1, r2]) = intBinary mkSDiv r r1 r2
@@ -2408,6 +2390,17 @@ getInstIR i (OP r DoubleATan [r1]) = doubleUnaryFn "atan" r r1
 getInstIR i (OP r DoubleSqrt [r1]) = doubleUnaryFn "llvm.sqrt.f64" r r1
 getInstIR i (OP r DoubleFloor [r1]) = doubleUnaryFn "llvm.floor.f64" r r1
 getInstIR i (OP r DoubleCeiling [r1]) = doubleUnaryFn "llvm.ceil.f64" r r1
+
+getInstIR i (OP r (Add ty) [r1, r2]) = boundedIntBinary (intKind ty) mkAddNoWrap r r1 r2
+getInstIR i (OP r (Sub ty) [r1, r2]) = boundedIntBinary (intKind ty) mkSub r r1 r2
+getInstIR i (OP r (Mul ty) [r1, r2]) = boundedIntBinary (intKind ty) mkMul r r1 r2
+getInstIR i (OP r (Div ty) [r1, r2]) = boundedIntBinary (intKind ty) mkUDiv r r1 r2
+getInstIR i (OP r (Mod ty) [r1, r2]) = boundedIntBinary (intKind ty) mkURem r r1 r2
+getInstIR i (OP r (BAnd ty) [r1, r2]) = boundedIntBinary (intKind ty) mkAnd r r1 r2
+getInstIR i (OP r (BOr ty) [r1, r2]) = boundedIntBinary (intKind ty) mkOr r r1 r2
+getInstIR i (OP r (BXOr ty) [r1, r2]) = boundedIntBinary (intKind ty) mkXOr r r1 r2
+getInstIR i (OP r (ShiftL ty) [r1, r2]) = boundedIntBinary (intKind ty) mkShiftL r r1 r2
+getInstIR i (OP r (ShiftR ty) [r1, r2]) = boundedIntBinary (intKind ty) mkShiftR r r1 r2
 
 getInstIR i (MKCON r (Left tag) args) = do
   obj <- mkCon tag args
