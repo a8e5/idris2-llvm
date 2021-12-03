@@ -3459,8 +3459,8 @@ getForeignFunctionIR i name cs args ret = do
   let found = findForeignName cs
   let builtin = found >>= ((flip lookup) builtinPrimitives)
   case (builtin, found) of
-       (Just b, _) => do builtinForeign b name args ret
-       (Nothing, Just funcName) => do genericForeign funcName name args ret
+       (Just b, _) => builtinForeign b name args ret
+       (Nothing, Just funcName) => genericForeign funcName name args ret
        (_, _) => missingForeign cs name args
 
 export
