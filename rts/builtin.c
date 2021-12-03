@@ -960,8 +960,7 @@ int64_t rapid_bigint_rshift_inplace(mp_limb_t *p, int64_t n, unsigned int count)
  */
 int64_t rapid_string_bytelength(Idris_TSO *base, ObjPtr strObj) {
   assert(OBJ_TYPE(strObj) == OBJ_TYPE_STRING);
-  // FIXME: this assumes ASCII, and returns just the string's length for now
-  // TODO: iterate over all codepoints and sum the required bytes for each one
+  // As strings are stored as UTF-8, we can just return the raw size:
   int length = OBJ_SIZE(strObj);
   return length;
 }
