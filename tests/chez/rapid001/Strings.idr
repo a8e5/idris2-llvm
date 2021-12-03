@@ -48,6 +48,9 @@ strMatch _ = "(other)"
 alphabet : String
 alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
+getUnicodeString : IO String
+getUnicodeString = pure "ünïcödë☃︎ünïcödë"
+
 partial
 main : IO ()
 main = do
@@ -74,8 +77,10 @@ main = do
   putStrLn $ "rev1: " ++ (prim__strReverse "")
   putStrLn $ "rev2: " ++ (prim__strReverse "x")
   putStrLn $ "rev3: " ++ (prim__strReverse alphabet)
+  uni <- getUnicodeString
+  putStrLn $ "rev4: " ++ (prim__strReverse uni)
   printLn $ fastUnpack "abc456@//$"
-  putStrLn $ fastPack $ unpack "ünïcödë"
+  putStrLn $ fastPack $ unpack uni
   printLn $ map (cast {to=Int}) $ fastUnpack "äöü☃"
   printLn $ toList $ Iterator.unpack "abc987@//$"
   printLn $ map (cast {to=Int}) $ toList $ Iterator.unpack "äöü☃"

@@ -26,6 +26,7 @@ static char **rapid_global_argv = NULL;
 
 uint32_t utf8_encode1_length(uint32_t codepoint);
 uint32_t utf8_encode1(char *dst, uint32_t codepoint);
+uint64_t utf8_decode1_length(const char *s);
 
 // Quick (not completely accurate) way to clamp a codepoint to the allowed
 // range
@@ -39,9 +40,17 @@ static ObjPtr wrapFilePtr(Idris_TSO *base, FILE *f) {
 }
 
 void rapid_strreverse(char *restrict dst, const char *restrict src, int64_t size) {
-  // FIXME: this reverses bytes, not characters (i.e. works only for ASCII)
-  for (int64_t i = 0; i < size; ++i) {
-    dst[size - 1 - i] = src[i];
+  for (int64_t i = 0; i < size;) {
+    uint64_t lengthCodepoint = utf8_decode1_length(&src[i]);
+
+    uint32_t numBytes = lengthCodepoint >> 32;
+    uint32_t codepoint = lengthCodepoint;
+
+    uint32_t encoded = utf8_encode1(&dst[size - i - numBytes], codepoint);
+    assert(encoded == numBytes);
+
+    i += numBytes;
+    assert(i <= size);
   }
 }
 
