@@ -874,8 +874,29 @@ showConstant (I32 i) = "(I32 " ++ show i ++ ")"
 showConstant (I64 i) = "(I64 " ++ show i ++ ")"
 showConstant other = "(CONST " ++ show other ++ ")"
 
+makeConstCaseLabelName : String -> Constant -> String
+makeConstCaseLabelName caseId (I i)   = caseId ++ "_is_" ++ show i
+makeConstCaseLabelName caseId (I8 i)  = caseId ++ "_is_" ++ show i
+makeConstCaseLabelName caseId (I16 i) = caseId ++ "_is_" ++ show i
+makeConstCaseLabelName caseId (I32 i) = caseId ++ "_is_" ++ show i
+makeConstCaseLabelName caseId (I64 i) = caseId ++ "_is_" ++ show i
+makeConstCaseLabelName caseId (B8 i)  = caseId ++ "_is_" ++ show i
+makeConstCaseLabelName caseId (B16 i) = caseId ++ "_is_" ++ show i
+makeConstCaseLabelName caseId (B32 i) = caseId ++ "_is_" ++ show i
+makeConstCaseLabelName caseId (B64 i) = caseId ++ "_is_" ++ show i
+makeConstCaseLabelName caseId (Ch c)  = caseId ++ "_is_" ++ show i where i:Int; i = (cast {to=Int} c)
+makeConstCaseLabelName caseId c       = "const case error: " ++ (showConstant c)
+
 makeConstCaseLabel : String -> (Constant, a) -> String
 makeConstCaseLabel caseId (I i,_) = "i64 " ++ show i ++ ", label %" ++ caseId ++ "_is_" ++ show i
+makeConstCaseLabel caseId (I8 i,_)  = "i64 " ++ show i ++ ", label %" ++ caseId ++ "_is_" ++ show i
+makeConstCaseLabel caseId (I16 i,_) = "i64 " ++ show i ++ ", label %" ++ caseId ++ "_is_" ++ show i
+makeConstCaseLabel caseId (I32 i,_) = "i64 " ++ show i ++ ", label %" ++ caseId ++ "_is_" ++ show i
+makeConstCaseLabel caseId (I64 i,_) = "i64 " ++ show i ++ ", label %" ++ caseId ++ "_is_" ++ show i
+makeConstCaseLabel caseId (B8 i,_)  = "i64 " ++ show i ++ ", label %" ++ caseId ++ "_is_" ++ show i
+makeConstCaseLabel caseId (B16 i,_) = "i64 " ++ show i ++ ", label %" ++ caseId ++ "_is_" ++ show i
+makeConstCaseLabel caseId (B32 i,_) = "i64 " ++ show i ++ ", label %" ++ caseId ++ "_is_" ++ show i
+makeConstCaseLabel caseId (B64 i,_) = "i64 " ++ show i ++ ", label %" ++ caseId ++ "_is_" ++ show i
 makeConstCaseLabel caseId (Ch c,_) = "i32 " ++ show i ++ ", label %" ++ caseId ++ "_is_" ++ show i where i:Int; i = (cast {to=Int} c)
 makeConstCaseLabel caseId (c,_) = "const case error: " ++ (showConstant c)
 
@@ -911,12 +932,20 @@ prepareArg RVal = do
   addError "cannot use rval as call arg"
   pure "error"
 
-data ConstCaseType = IntLikeCase | BigIntCase | StringCase | CharCase
+data ConstCaseType = IntLikeCase Constant | BigIntCase | StringCase | CharCase
 
 total
 findConstCaseType : List (Constant, List VMInst) -> Either String ConstCaseType
 findConstCaseType [] = Left "empty const case"
-findConstCaseType ((I _,_)::_) = pure IntLikeCase
+findConstCaseType ((I _,_)::_) = pure (IntLikeCase IntType)
+findConstCaseType ((I8 _,_)::_) = pure (IntLikeCase Int8Type)
+findConstCaseType ((I16 _,_)::_) = pure (IntLikeCase Int16Type)
+findConstCaseType ((I32 _,_)::_) = pure (IntLikeCase Int32Type)
+findConstCaseType ((I64 _,_)::_) = pure (IntLikeCase Int64Type)
+findConstCaseType ((B8 _,_)::_) = pure (IntLikeCase Bits8Type)
+findConstCaseType ((B16 _,_)::_) = pure (IntLikeCase Bits16Type)
+findConstCaseType ((B32 _,_)::_) = pure (IntLikeCase Bits32Type)
+findConstCaseType ((B64 _,_)::_) = pure (IntLikeCase Bits64Type)
 findConstCaseType ((BI _,_)::_) = pure BigIntCase
 findConstCaseType ((Str _,_)::_) = pure StringCase
 findConstCaseType ((Ch _,_)::_) = pure CharCase
@@ -1051,28 +1080,6 @@ getInstForConstCaseChar i r alts def =
       traverse_ (getInstIRWithComment i) is
       appendCode $ "br label %" ++ caseId ++ "_end"
     makeCaseAlt _ (c, _) = appendCode $ "ERROR: constcase must be Char, got: " ++ show c
-
-getInstForConstCaseInt : {auto conNames : SortedMap Name Int} -> Int -> Reg -> List (Constant, List VMInst) -> Maybe (List VMInst) -> Codegen ()
-getInstForConstCaseInt i r alts def =
-  do caseId <- mkVarName "case_"
-     assertObjectType r OBJECT_TYPE_ID_INT
-     let def' = fromMaybe [(ERROR $ "no default in const case (int)" ++ caseId)] def
-     let labelEnd = caseId ++ "_end"
-     scrutinee <- unboxInt (reg2val r)
-     appendCode $ "  switch " ++ toIR scrutinee ++ ", label %" ++ caseId ++ "_default [ " ++ (showSep "\n      " (map (makeConstCaseLabel caseId) alts)) ++ " ]"
-     appendCode $ caseId ++ "_default:"
-     traverse_ (getInstIRWithComment i) def'
-     appendCode $ "br label %" ++ labelEnd
-     traverse_ (makeCaseAlt caseId) alts
-     appendCode $ labelEnd ++ ":"
-     pure ()
-  where
-    makeCaseAlt : String -> (Constant, List VMInst) -> Codegen ()
-    makeCaseAlt caseId (I c, is) = do
-      appendCode $ caseId ++ "_is_" ++ (show c) ++ ":"
-      traverse_ (getInstIRWithComment i) is
-      appendCode $ "br label %" ++ caseId ++ "_end"
-    makeCaseAlt _ (c, _) = appendCode $ "ERROR: constcase must be Int, got: " ++ show c
 
 getInstForConstCaseString : {auto conNames : SortedMap Name Int} -> Int -> Reg -> List (Constant, List VMInst) -> Maybe (List VMInst) -> Codegen ()
 getInstForConstCaseString i r alts def =
@@ -1341,6 +1348,25 @@ genericCast fromType toType dest src with (intKind fromType, intKind toType)
   genericCast fromType toType dest src | _ = do
     addError ("cast not implemented: " ++ (show fromType) ++ " -> " ++ (show toType))
 
+getInstForConstCaseIntLike : {auto conNames : SortedMap Name Int} -> Constant -> Int -> Reg -> List (Constant, List VMInst) -> Maybe (List VMInst) -> Codegen ()
+getInstForConstCaseIntLike ty i r alts def =
+  do caseId <- mkVarName "case_"
+     let def' = fromMaybe [(ERROR $ "no default in const case (int)" ++ caseId)] def
+     let labelEnd = caseId ++ "_end"
+     scrutinee <- genericIntUnbox ty !(load $ reg2val r)
+     appendCode $ "  switch " ++ toIR scrutinee ++ ", label %" ++ caseId ++ "_default [ " ++ (showSep "\n      " (map (makeConstCaseLabel caseId) alts)) ++ " ]"
+     appendCode $ caseId ++ "_default:"
+     traverse_ (getInstIRWithComment i) def'
+     appendCode $ "br label %" ++ labelEnd
+     traverse_ (makeCaseAlt caseId) alts
+     appendCode $ labelEnd ++ ":"
+     pure ()
+  where
+    makeCaseAlt : String -> (Constant, List VMInst) -> Codegen ()
+    makeCaseAlt caseId (c, is) = do
+      appendCode $ makeConstCaseLabelName caseId c ++ ":"
+      traverse_ (getInstIRWithComment i) is
+      appendCode $ "br label %" ++ caseId ++ "_end"
 
 doubleCmp : String -> Reg -> Reg -> Reg -> Codegen ()
 doubleCmp op dest a b = do
@@ -2578,7 +2604,7 @@ getInstIR i (MKCONSTANT r WorldVal) = do
 getInstIR i (MKCONSTANT r (Str s)) = store !(mkStr i s) (reg2val r)
 
 getInstIR i (CONSTCASE r alts def) = case findConstCaseType alts of
-                                          Right IntLikeCase => getInstForConstCaseInt i r alts def
+                                          Right (IntLikeCase ty) => getInstForConstCaseIntLike ty i r alts def
                                           Right BigIntCase => getInstForConstCaseInteger i r alts def
                                           Right StringCase => getInstForConstCaseString i r alts def
                                           Right CharCase => getInstForConstCaseChar i r alts def
