@@ -57,8 +57,6 @@ Differences from mainline Idris 2:
 
 Currently **not** implemented:
 
- * Unicode Strings (strings containing codepoints > U+007F will be garbled,
-     lengths and offsets will be incorrect)
  * FFI (the FFI functions from prelude and base are hardcoded & handwritten
      specifically for the RTS)
  * Concurrency
