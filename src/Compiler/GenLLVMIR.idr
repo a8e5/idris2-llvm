@@ -911,13 +911,15 @@ prepareArg RVal = do
   addError "cannot use rval as call arg"
   pure "error"
 
+data ConstCaseType = IntLikeCase | BigIntCase | StringCase | CharCase
+
 total
-findConstCaseType : List (Constant, List VMInst) -> Either String Constant
+findConstCaseType : List (Constant, List VMInst) -> Either String ConstCaseType
 findConstCaseType [] = Left "empty const case"
-findConstCaseType ((I _,_)::_) = pure IntType
-findConstCaseType ((BI _,_)::_) = pure IntegerType
-findConstCaseType ((Str _,_)::_) = pure StringType
-findConstCaseType ((Ch _,_)::_) = pure CharType
+findConstCaseType ((I _,_)::_) = pure IntLikeCase
+findConstCaseType ((BI _,_)::_) = pure BigIntCase
+findConstCaseType ((Str _,_)::_) = pure StringCase
+findConstCaseType ((Ch _,_)::_) = pure CharCase
 findConstCaseType ((c,_)::_) = Left $ "unknown const case type: " ++ (showConstant c)
 
 compareStr : IRValue IRObjPtr -> IRValue IRObjPtr -> Codegen (IRValue I1)
@@ -2576,11 +2578,10 @@ getInstIR i (MKCONSTANT r WorldVal) = do
 getInstIR i (MKCONSTANT r (Str s)) = store !(mkStr i s) (reg2val r)
 
 getInstIR i (CONSTCASE r alts def) = case findConstCaseType alts of
-                                          Right IntType => getInstForConstCaseInt i r alts def
-                                          Right IntegerType => getInstForConstCaseInteger i r alts def
-                                          Right StringType => getInstForConstCaseString i r alts def
-                                          Right CharType => getInstForConstCaseChar i r alts def
-                                          Right t => addError ("constcase error, unhandled type: " ++ show t)
+                                          Right IntLikeCase => getInstForConstCaseInt i r alts def
+                                          Right BigIntCase => getInstForConstCaseInteger i r alts def
+                                          Right StringCase => getInstForConstCaseString i r alts def
+                                          Right CharCase => getInstForConstCaseChar i r alts def
                                           Left err => addError ("constcase error: " ++ err)
 
 getInstIR {conNames} i (CASE r alts def) =
