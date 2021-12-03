@@ -1070,7 +1070,6 @@ getInstForConstCaseInt i r alts def =
       appendCode $ caseId ++ "_is_" ++ (show c) ++ ":"
       traverse_ (getInstIRWithComment i) is
       appendCode $ "br label %" ++ caseId ++ "_end"
-    makeCaseAlt caseId (BI c, is) = makeCaseAlt caseId (I $ cast c, is)
     makeCaseAlt _ (c, _) = appendCode $ "ERROR: constcase must be Int, got: " ++ show c
 
 getInstForConstCaseString : {auto conNames : SortedMap Name Int} -> Int -> Reg -> List (Constant, List VMInst) -> Maybe (List VMInst) -> Codegen ()
