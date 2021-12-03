@@ -1270,9 +1270,13 @@ genericIntBox ty ival with (intKind ty)
     cgMkInt (Const I64 0)
 
 genericCast : Constant -> Constant -> Reg -> Reg -> Codegen ()
-genericCast fromType toType dest src with (intKind fromType, intKind toType)
+genericCast fromType toType dest src =
+  genericCast' fromType toType dest src (intKind fromType) (intKind toType)
+
+  where
+  genericCast' : Constant -> Constant -> Reg -> Reg -> Maybe IntKind -> Maybe IntKind -> Codegen ()
   -- to Char
-  genericCast fromType CharType dest src | (Just _, _) = do
+  genericCast' fromType CharType dest src (Just _) _ = do
     raw <- genericIntUnbox fromType !(load (reg2val src))
     ival <- mkTrunc {to=I32} raw
     -- this also helps to rule out negative values, should fromType be signed
@@ -1286,27 +1290,27 @@ genericCast fromType toType dest src with (intKind fromType, intKind toType)
     store newObj (reg2val dest)
 
   -- to Double
-  genericCast fromType DoubleType dest src | (Just (Unsigned _), _) = do
+  genericCast' fromType DoubleType dest src (Just (Unsigned _)) _ = do
     ival <- genericIntUnbox fromType !(load (reg2val src))
     newObj <- cgMkDouble !(uitofp ival)
     store newObj (reg2val dest)
-  genericCast fromType DoubleType dest src | (Just (Signed (P _)), _) = do
+  genericCast' fromType DoubleType dest src (Just (Signed (P _))) _ = do
     ival <- genericIntUnbox fromType !(load (reg2val src))
     newObj <- cgMkDouble !(sitofp ival)
     store newObj (reg2val dest)
 
   -- from Double
-  genericCast DoubleType toType dest src | (_, Just (Unsigned _)) = do
+  genericCast' DoubleType toType dest src _ (Just (Unsigned _)) = do
     f1 <- unboxDouble !(load (reg2val src))
     newObj <- genericIntBox toType !(fptoui f1)
     store newObj (reg2val dest)
-  genericCast DoubleType toType dest src | (_, Just (Signed (P _))) = do
+  genericCast' DoubleType toType dest src _ (Just (Signed (P _))) = do
     f1 <- unboxDouble !(load (reg2val src))
     newObj <- genericIntBox toType !(fptosi f1)
     store newObj (reg2val dest)
 
   -- to String
-  genericCast fromType StringType dest src | (Just _, _) = do
+  genericCast' fromType StringType dest src (Just _) _ = do
     ival <- genericIntUnbox fromType !(load (reg2val src))
     -- max size of 2^64 = 20 + (optional "-" prefix) + NUL byte (from snprintf)
     newStr <- dynamicAllocate (ConstI64 24)
@@ -1317,18 +1321,18 @@ genericCast fromType toType dest src with (intKind fromType, intKind toType)
     store newStr (reg2val dest)
 
   -- from String
-  genericCast StringType toType dest src | (_, Just _) = do
+  genericCast' StringType toType dest src _ (Just _) = do
     strObj <- load (reg2val src)
     parsedVal <- SSA I64 <$> assignSSA ("  call ccc i64 @idris_rts_str_to_int(" ++ toIR strObj ++ ")")
     newObj <- genericIntBox toType parsedVal
     store newObj (reg2val dest)
 
   -- from generic int to generic int
-  genericCast fromType IntType dest src | (Just _, _) = do
+  genericCast' fromType IntType dest src (Just _) _ = do
     ival <- genericIntUnbox fromType !(load (reg2val src))
     newObj <- cgMkInt ival
     store newObj (reg2val dest)
-  genericCast fromType toType dest src | (Just _, Just (Unsigned bits)) = do
+  genericCast' fromType toType dest src (Just _) (Just (Unsigned bits)) = do
     ival <- genericIntUnbox fromType !(load (reg2val src))
     newObj <- if bits == 64
                  then cgMkBits64 ival
@@ -1336,7 +1340,7 @@ genericCast fromType toType dest src with (intKind fromType, intKind toType)
                          truncatedVal <- mkAnd (Const I64 mask) ival
                          cgMkInt truncatedVal
     store newObj (reg2val dest)
-  genericCast fromType toType dest src | (Just _, Just (Signed (P bits))) = do
+  genericCast' fromType toType dest src (Just _) (Just (Signed (P bits))) = do
     ival <- genericIntUnbox fromType !(load (reg2val src))
     newObj <- if bits == 64
                  then cgMkBits64 ival
@@ -1345,7 +1349,7 @@ genericCast fromType toType dest src with (intKind fromType, intKind toType)
                          cgMkInt truncatedVal
     store newObj (reg2val dest)
 
-  genericCast fromType toType dest src | _ = do
+  genericCast' fromType toType dest src _ _ = do
     addError ("cast not implemented: " ++ (show fromType) ++ " -> " ++ (show toType))
 
 getInstForConstCaseIntLike : {auto conNames : SortedMap Name Int} -> Constant -> Int -> Reg -> List (Constant, List VMInst) -> Maybe (List VMInst) -> Codegen ()
