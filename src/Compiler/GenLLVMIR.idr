@@ -3266,6 +3266,16 @@ genericForeign foreignName name argTypes ret = do
   funcReturn
   appendCode "\n}\n"
 
+missingForeign : List String -> Name -> (argTypes : List CFType) -> Codegen ()
+missingForeign cs name argTypes = do
+  let args = map (\(i, _) => SSA IRObjPtr ("%arg" ++ show i)) (enumerate argTypes)
+  appendCode ("define private fastcc %Return1 @" ++ safeName name ++ "(" ++ (showSep ", " $ prepareArgCallConv $ map toIR args) ++ ") gc \"statepoint-example\" {")
+  funcEntry
+  appendCode $ "call ccc void @idris_rts_crash(i64 404) noreturn"
+  addError $ "missing foreign: " ++ show name ++ " <- " ++ show cs
+  funcReturn
+  appendCode "\n}\n"
+
 builtinPrimitives : List (String, (n : Nat ** (Vect n (IRValue IRObjPtr) -> Codegen ())))
 builtinPrimitives = [
     ("prim/blodwen-new-buffer", (2 ** mk_prim__bufferNew))
@@ -3451,7 +3461,7 @@ getForeignFunctionIR i name cs args ret = do
   case (builtin, found) of
        (Just b, _) => do builtinForeign b name args ret
        (Nothing, Just funcName) => do genericForeign funcName name args ret
-       (_, _) => addError $ "missing foreign: " ++ show name ++ " <- " ++ show cs
+       (_, _) => missingForeign cs name args
 
 export
 getVMIR : CompileOpts -> SortedMap Name Int -> (Int, (Name, VMDef)) -> String
