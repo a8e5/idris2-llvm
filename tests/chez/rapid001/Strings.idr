@@ -75,6 +75,7 @@ main = do
   putStrLn $ "rev2: " ++ (prim__strReverse "x")
   putStrLn $ "rev3: " ++ (prim__strReverse alphabet)
   printLn $ fastUnpack "abc456@//$"
+  putStrLn $ fastPack $ unpack "ünïcödë"
   printLn $ map (cast {to=Int}) $ fastUnpack "äöü☃"
   printLn $ toList $ Iterator.unpack "abc987@//$"
   printLn $ map (cast {to=Int}) $ toList $ Iterator.unpack "äöü☃"

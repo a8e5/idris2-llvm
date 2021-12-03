@@ -24,6 +24,13 @@
 static int rapid_global_argc = 0;
 static char **rapid_global_argv = NULL;
 
+uint32_t utf8_encode1_length(uint32_t codepoint);
+uint32_t utf8_encode1(char *dst, uint32_t codepoint);
+
+// Quick (not completely accurate) way to clamp a codepoint to the allowed
+// range
+#define FAST_UNICODE_MASK 0x1fffff
+
 static ObjPtr wrapFilePtr(Idris_TSO *base, FILE *f) {
   ObjPtr ptrObj = rapid_C_allocate(base, HEADER_SIZE + POINTER_SIZE);
   ptrObj->hdr = MAKE_HEADER(OBJ_TYPE_OPAQUE, POINTER_SIZE);
@@ -714,13 +721,17 @@ const int TAG_LIST_CONS = 1;
 ObjPtr rapid_fast_pack(Idris_TSO *base, ObjPtr charListObj) {
   assert(OBJ_TYPE(charListObj) == OBJ_TYPE_CON_NO_ARGS);
 
-  // FIXME: only works for ASCII
   int32_t strLength = 0;
   ObjPtr cursor = charListObj;
+  assert(OBJ_TYPE(cursor) == OBJ_TYPE_CON_NO_ARGS);
   while (OBJ_TAG(cursor) == TAG_LIST_CONS) {
-    assert(OBJ_TYPE(cursor) == OBJ_TYPE_CON_NO_ARGS);
-    strLength += 1;
+    ObjPtr charObj = OBJ_GET_SLOT(cursor, 0);
+    assert(OBJ_TYPE(charObj) == OBJ_TYPE_CHAR);
+
+    uint32_t codepoint = OBJ_SIZE(charObj) & FAST_UNICODE_MASK;
+    strLength += utf8_encode1_length(codepoint);
     cursor = OBJ_GET_SLOT(cursor, 1);
+    assert(OBJ_TYPE(cursor) == OBJ_TYPE_CON_NO_ARGS);
   }
 
   ObjPtr newStr = rapid_C_allocate(base, HEADER_SIZE + strLength);
@@ -730,14 +741,15 @@ ObjPtr rapid_fast_pack(Idris_TSO *base, ObjPtr charListObj) {
   char *dst = OBJ_PAYLOAD(newStr);
   cursor = charListObj;
   while (OBJ_TAG(cursor) == TAG_LIST_CONS) {
-    assert(OBJ_TYPE(cursor) == OBJ_TYPE_CON_NO_ARGS);
-    assert(strPos < strLength);
     ObjPtr charObj = OBJ_GET_SLOT(cursor, 0);
     assert(OBJ_TYPE(charObj) == OBJ_TYPE_CHAR);
-    dst[strPos] = OBJ_SIZE(charObj) & 0xff;
-    strPos += 1;
+    uint32_t codepoint = OBJ_SIZE(charObj) & FAST_UNICODE_MASK;
+    strPos += utf8_encode1(&dst[strPos], codepoint);
+    assert(strPos <= strLength);
     cursor = OBJ_GET_SLOT(cursor, 1);
+    assert(OBJ_TYPE(cursor) == OBJ_TYPE_CON_NO_ARGS);
   }
+  assert(strPos == strLength);
   return newStr;
 }
 
@@ -1126,6 +1138,22 @@ uint32_t utf8_encode1(char *dst, uint32_t codepoint) {
     p[1] = 0x80 | ((codepoint >> 12) & 0x3f);
     p[2] = 0x80 | ((codepoint >>  6) & 0x3f);
     p[3] = 0x80 | ((codepoint >>  0) & 0x3f);
+    return 4;
+  }
+}
+
+/**
+ * Return the number of bytes required to encode the given codepoint in UTF-8
+ * (min. 1, max. 4)
+ */
+uint32_t utf8_encode1_length(uint32_t codepoint) {
+  if (codepoint <= 0x7f) {
+    return 1;
+  } else if (codepoint <= 0x07ff) {
+    return 2;
+  } else if (codepoint <= 0xffff) {
+    return 3;
+  } else {
     return 4;
   }
 }
