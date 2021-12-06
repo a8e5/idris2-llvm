@@ -69,7 +69,7 @@ int rts_main(int argc, char **argv) {
   rapid_gc_init();
   rapid_builtin_init(argc, argv);
 
-  Idris_TSO *tso = malloc(sizeof(Idris_TSO));
+  Idris_TSO *tso = calloc(1, sizeof(Idris_TSO));
   rapid_gc_setup_heap(tso);
   tso->rapid_errno = 1;
 
