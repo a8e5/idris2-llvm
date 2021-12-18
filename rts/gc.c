@@ -76,6 +76,7 @@ static inline ObjPtr alloc_during_gc(Idris_TSO *base, uint32_t size) {
   } else {
     assert(base->nurseryCur->link);
     base->used_nursery_size += (size_t)base->nurseryCur->free - (size_t)base->nurseryCur->start;
+    // TODO: count "slack" bytes
     base->nurseryCur = base->nurseryCur->link;
     p = base->nurseryCur->free;
     base->nurseryCur->free = p + aligned(size);
@@ -259,7 +260,7 @@ static struct block_descr *gc_alloc_chain(size_t size) {
     struct block_descr *next_head = get_block_descr(mem);
     next_head->link = head;
     next_head->pending = next_head->start;
-    allocated_size += next_head->num_blocks * BLOCK_SIZE;
+    allocated_size += block_group_get_size(next_head);
     head = next_head;
   } while (allocated_size < size);
   return head;
@@ -515,6 +516,7 @@ idris_rts_more_heap(Idris_TSO *base, uint8_t *sp) {
   if (base->nurseryCur->link) {
     // switch to next block group
     base->nurseryCur = base->nurseryCur->link;
+    // TODO: count "slack" bytes
 
     update_heap_pointers(base);
     assert((uint64_t)base->nurseryNext + base->heap_alloc <= (uint64_t)base->nurseryEnd);
