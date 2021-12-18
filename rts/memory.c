@@ -51,7 +51,8 @@ void *alloc_clusters(size_t count) {
     CRASH("memory allocation failed");
   }
 
-  hashset_add(rapid_mem.all_clusters, mem);
+  uint64_t memarea = (uint64_t)mem >> CLUSTER_SHIFT;
+  hashset_add(rapid_mem.all_clusters, (void *)memarea);
 
   return mem;
 }
@@ -65,7 +66,8 @@ void *alloc_clusters(size_t count) {
  */
 bool is_heap_alloc(void *addr) {
   uint64_t cluster_start = (uint64_t)(addr) & CLUSTER_CLUSTER_MASK;
-  return hashset_is_member(rapid_mem.all_clusters, (void *)cluster_start);
+  uint64_t memarea = cluster_start >> CLUSTER_SHIFT;
+  return hashset_is_member(rapid_mem.all_clusters, (void *)memarea);
 }
 
 /*
