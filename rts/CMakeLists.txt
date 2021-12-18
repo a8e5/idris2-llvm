@@ -73,7 +73,7 @@ add_executable(rapid_rts_test
   test/test_main.c
   ${RTS_SOURCES}
   )
-target_compile_options(rapid_rts_test PUBLIC ${RTS_CFLAGS})
+target_compile_options(rapid_rts_test PUBLIC -g ${RTS_CFLAGS})
 target_include_directories(rapid_rts_test PUBLIC ${RTS_INCLUDES})
 target_link_directories(rapid_rts_test PUBLIC
   "/usr/local/lib"
