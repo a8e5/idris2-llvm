@@ -230,8 +230,8 @@ void free_block_group(void *start) {
   assert(bdesc->num_blocks);
 
   if (bdesc->num_blocks > CLUSTER_MAX_BLOCKS) {
-    memset(bdesc->start, 0, BLOCK_SIZE * bdesc->num_blocks);
-    fprintf(stderr, "NOT IMPLEMENTED: free oversized allocation\n");
+    // This is an oversized cluster, can be freed as is
+    free_clusters((void *)CLUSTER_ROUND_DOWN(bdesc));
     return;
   }
 
