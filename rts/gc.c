@@ -302,6 +302,34 @@ static inline void update_heap_pointers(Idris_TSO *base) {
   base->nurseryEnd = block_group_get_end(base->nurseryCur);
 }
 
+/**
+ * Shrink the nursery so that it is approximately @target_size bytes large
+ *
+ * The shrunk nursery may be slightly larger than requested, but never smaller.
+ */
+static void shrink_nursery(Idris_TSO *base, size_t target_size) {
+  struct block_descr *bdescr = base->nurseryCur;
+  size_t sz = base->used_nursery_size + block_group_count_free_bytes(bdescr);
+
+  while (sz < target_size) {
+    bdescr = bdescr->link;
+    // nursery size before should be larger, so we should never reach the end
+    // of the nursery
+    assert(bdescr);
+
+    sz += block_group_count_free_bytes(bdescr);
+  }
+
+  // now `bdescr` is the last block in the new nursery chain
+  struct block_descr *tail = bdescr->link;
+  assert(tail);
+
+  bdescr->link = NULL;
+  gc_free_chain(tail);
+
+  base->next_nursery_size = target_size;
+}
+
 void idris_rts_gc(Idris_TSO *base, uint8_t *sp) {
   /*uint8_t * orig_sp = sp;*/
 #ifdef RAPID_GC_DEBUG_ENABLED
@@ -425,7 +453,10 @@ void idris_rts_gc(Idris_TSO *base, uint8_t *sp) {
     base->next_nursery_size = thisNurserySize * 2;
   } else if (base->used_nursery_size < (thisNurserySize / 4)
       && (thisNurserySize >= 2 * INITIAL_NURSERY_SIZE)) {
-    base->next_nursery_size = thisNurserySize / 2;
+    // If less than 25% of currently available heap used, shrink it.
+    // We have to perform the shrinking immediately, because during next GC,
+    // the live data might already be too big for the planned shrinking.
+    shrink_nursery(base, thisNurserySize / 2);
   }
 
 #ifdef RAPID_GC_STATS_ENABLED

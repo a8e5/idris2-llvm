@@ -130,8 +130,17 @@ static inline struct block_descr *get_block_descr(void *X) {
   return (struct block_descr *)block_descr_addr;
 }
 
+static inline size_t block_group_get_size(struct block_descr *bdescr) {
+  return bdescr->num_blocks * BLOCK_SIZE;
+}
+
 static inline void *block_group_get_end(struct block_descr *bdesc) {
   return (char *)bdesc->start + (BLOCK_SIZE * bdesc->num_blocks);
+}
+
+static inline size_t block_group_count_free_bytes(struct block_descr *bdescr) {
+  assert(bdescr->free);
+  return (size_t)block_group_get_end(bdescr) - (size_t)bdescr->free;
 }
 
 /// Remove from doubly-linked list
