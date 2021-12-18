@@ -36,8 +36,10 @@ void* alloc_large_obj(size_t generation_number, uint64_t size);
 #define CLUSTER_BLOCK_MASK (CLUSTER_SIZE - 1)
 #define CLUSTER_CLUSTER_MASK (~CLUSTER_BLOCK_MASK)
 #define CLUSTER_ROUND_UP(x) (ROUND_UP(x, CLUSTER_SIZE))
+#define CLUSTER_ROUND_DOWN(x) ((uintptr_t)(x) & CLUSTER_CLUSTER_MASK)
 
 #define BLOCKDESCR_SIZE 0x40
+#define CLUSTER_BLOCK_INDEX(x) (((uintptr_t)(x) & CLUSTER_BLOCK_MASK) / BLOCK_SIZE)
 #define CLUSTER_FIRST_BLOCK_OFFSET (BLOCK_ROUND_UP(BLOCKDESCR_SIZE * (CLUSTER_SIZE/BLOCK_SIZE)))
 #define CLUSTER_FIRST_BLOCK_INDEX (CLUSTER_FIRST_BLOCK_OFFSET / BLOCK_SIZE)
 // max. number of blocks in one cluster (taking offset into account)
@@ -61,12 +63,13 @@ struct block_descr {
   /// pointer to this block's memory
   void *start;
   /// `NULL` if this block is in the free list, otherwise pointer to the first
-  /// free byte
+  /// free byte (only valid for group head)
   void *free;
+  /// number of blocks if group head, otherwise 0
   size_t num_blocks;
   struct cellblock_info cellinfo; // only for cell-blocks
   void *pending; // only needed during GC
-  /// linked-list link to next block
+  /// linked-list link to next block if group head, otherwise link to group head
   struct block_descr *link;
   /// linked-list link to previous block
   struct block_descr *back;

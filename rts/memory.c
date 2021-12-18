@@ -22,6 +22,7 @@
 static_assert(CLUSTER_FIRST_BLOCK_OFFSET == 16384, "verify expected first block offset");
 
 static void add_to_freelist(void *start);
+static void add_to_freelist_direct(void *start);
 static void *take_from_freelist(size_t num_blocks);
 
 void CRASH(const char *msg) {
@@ -93,6 +94,14 @@ void init_block_group(void *start, size_t num_blocks) {
   bdesc->free = start;
   bdesc->num_blocks = num_blocks;
 
+  if (num_blocks > 1 && num_blocks <= CLUSTER_MAX_BLOCKS) {
+    assert(CLUSTER_BLOCK_INDEX(bdesc->start) + bdesc->num_blocks <= (CLUSTER_FIRST_BLOCK_INDEX + CLUSTER_MAX_BLOCKS));
+    struct block_descr *trailer = bdesc + (num_blocks - 1);
+    assert(CLUSTER_ROUND_DOWN(bdesc) == CLUSTER_ROUND_DOWN(trailer));
+    trailer->num_blocks = 0;
+    trailer->link = bdesc;
+  }
+
   // TODO: this is inefficient, we can probably just zero memory in
   // alloc_block_group right before returning it
   memset(bdesc->start, 0, bdesc->num_blocks * BLOCK_SIZE);
@@ -110,20 +119,25 @@ static void *split_block_group(void *start, size_t num_blocks) {
 
   size_t tail_num_blocks = head->num_blocks - num_blocks;
   head->num_blocks = num_blocks;
+
+  if (num_blocks > 1) {
+    struct block_descr *trailer = head + (num_blocks - 1);
+    trailer->num_blocks = 0;
+    trailer->link = head;
+  }
+
   void *tail_start = block_group_get_end(head);
   init_block_group(tail_start, tail_num_blocks);
-  add_to_freelist(tail_start);
+  add_to_freelist_direct(tail_start);
 
   return start;
 }
 
-static void add_to_freelist(void *start) {
-  // TODO: coalesce adjacent empty block groups
+/**
+ * Add a block to the freelist without attempting any kind of coalescing
+ */
+static void add_to_freelist_direct(void *start) {
   struct block_descr *bdesc = get_block_descr(start);
-
-  // make sure the bdescr is not already on the freelist:
-  // bdescrs on the freelist have their ->free set to NULL
-  assert(bdesc->free);
 
   bdesc->free = NULL;
   size_t free_list_index = log2i(bdesc->num_blocks);
@@ -131,6 +145,67 @@ static void add_to_freelist(void *start) {
 
   dbl_link_insert(&rapid_mem.free_list[free_list_index], bdesc);
 }
+
+static inline void remove_from_freelist(struct block_descr *bdescr) {
+  size_t free_list_index = log2i(bdescr->num_blocks);
+  assert(free_list_index < NUM_FREE_LISTS);
+  dbl_link_remove(&rapid_mem.free_list[free_list_index], bdescr);
+}
+
+/**
+ * Add block to freelist after coalescing it with adjacent free block groups
+ */
+static void add_to_freelist(void *start) {
+  struct block_descr *bdesc = get_block_descr(start);
+
+  // make sure the bdescr is not already on the freelist:
+  // bdescrs on the freelist have their ->free set to NULL
+  assert(bdesc->free);
+
+  size_t block_number_in_cluster = CLUSTER_BLOCK_INDEX(start);
+  if (block_number_in_cluster != CLUSTER_FIRST_BLOCK_INDEX) {
+    assert(block_number_in_cluster > CLUSTER_FIRST_BLOCK_INDEX);
+    struct block_descr *preceeding = bdesc - 1;
+    if (preceeding->num_blocks == 0) {
+      assert(preceeding->link && "invalid trailer block");
+      preceeding = preceeding->link;
+    }
+    assert(block_group_get_end(preceeding) == start);
+    if (preceeding->free == NULL) {
+      remove_from_freelist(preceeding);
+
+      // the block group immediately preceeding this one is also free
+      preceeding->num_blocks += bdesc->num_blocks;
+      bdesc = preceeding;
+    }
+  }
+
+  void *following_start = block_group_get_end(bdesc);
+  // If the end falls exactly on a cluster boundary, do nothing.
+  // Otherwise, check if the block group following immediately is also free and
+  // coalesce.
+  if ((uintptr_t)following_start & CLUSTER_BLOCK_MASK) {
+    assert(CLUSTER_ROUND_DOWN(start) == CLUSTER_ROUND_DOWN(following_start));
+    struct block_descr *following = get_block_descr(following_start);
+    if (following->free == NULL) {
+      assert(following->start == following_start);
+      // The block group immediately following is also free.
+      // Remove it from the freelist and merge with this block group
+      remove_from_freelist(following);
+      bdesc->num_blocks += following->num_blocks;
+    }
+  }
+
+  assert(bdesc->num_blocks && bdesc->num_blocks <= CLUSTER_MAX_BLOCKS);
+  if (bdesc->num_blocks > 1) {
+    struct block_descr *trailer = bdesc + (bdesc->num_blocks - 1);
+    trailer->num_blocks = 0;
+    trailer->link = bdesc;
+  }
+
+  add_to_freelist_direct(bdesc->start);
+}
+
 
 void free_block_group(void *start) {
   struct block_descr *bdesc = get_block_descr(start);
@@ -143,7 +218,6 @@ void free_block_group(void *start) {
     return;
   }
 
-  // TODO: is there something else, that needs to be done?
   add_to_freelist(start);
 }
 
@@ -313,6 +387,13 @@ int test_memory() {
   assert(memstats_count_freelist_groups() == 1);
 
   free_block_group(one_block);
+  // after freeing, it should be merged with the existing group in the freelist
+  assert(memstats_count_freelist_groups() == 1);
+
+  void *block1 = alloc_block_group(3);
+  void *block2 = alloc_block_group(1);
+  assert(block1 && block2);
+  assert(memstats_count_freelist_groups() == 3);
 
   void *allocations[CLUSTER_MAX_BLOCKS];
   for (size_t i = 1; i < CLUSTER_MAX_BLOCKS; ++i) {
