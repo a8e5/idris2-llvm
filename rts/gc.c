@@ -481,7 +481,24 @@ void idris_rts_gc(Idris_TSO *base, uint8_t *sp) {
     if (base->nurseryCur->link) {
       base->nurseryCur = base->nurseryCur->link;
     } else {
-      rapid_C_crash("nursery too small");
+      // GC finished, but there still is not enough room in the new nursery.
+      // This can happen due to "lost" bytes at the end of blocks.
+      // Allocate an "emergency block" and link it to the existing chain.
+      // TODO: this can also be just a single block (as opposed to big block
+      // group), we just need to survive one allocation, next GC, nursery will
+      // be grown
+      // TODO: maybe it makes sense to double nursery size immediately?
+      // (should be easy enough to allocate another chain and link it onto the
+      // existing one? otoh this should be rare enough to not actually matter)
+      void *mem = alloc_block_group(CLUSTER_MAX_BLOCKS);
+      struct block_descr *emergency_bdescr = get_block_descr(mem);
+      emergency_bdescr->link = NULL;
+      emergency_bdescr->pending = emergency_bdescr->start;
+      base->nurseryCur->link = emergency_bdescr;
+      base->nurseryCur = emergency_bdescr;
+#ifdef RAPID_GC_DEBUG_ENABLED
+      fprintf(stderr, "EMERGENCY allocation finished\n");
+#endif
     }
   }
 
