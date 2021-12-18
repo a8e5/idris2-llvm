@@ -58,6 +58,14 @@ void *alloc_clusters(size_t count) {
   return mem;
 }
 
+void free_clusters(void *mem) {
+  assert(((uintptr_t)mem & CLUSTER_BLOCK_MASK) == 0);
+  free(mem);
+
+  uint64_t memarea = (uint64_t)mem >> CLUSTER_SHIFT;
+  hashset_remove(rapid_mem.all_clusters, (void *)memarea);
+}
+
 
 /**
  * Find out if a given memory address is managed by this memory manager
@@ -135,9 +143,18 @@ static void *split_block_group(void *start, size_t num_blocks) {
 
 /**
  * Add a block to the freelist without attempting any kind of coalescing
+ *
+ * If the block group comprises the whole cluster, the memory is returned using
+ * free(3).
  */
 static void add_to_freelist_direct(void *start) {
   struct block_descr *bdesc = get_block_descr(start);
+
+  if (bdesc->num_blocks == CLUSTER_MAX_BLOCKS) {
+    // This is one whole cluster, return it instead of adding to the freelist
+    free_clusters((void *)CLUSTER_ROUND_DOWN(bdesc));
+    return;
+  }
 
   bdesc->free = NULL;
   size_t free_list_index = log2i(bdesc->num_blocks);
@@ -387,13 +404,13 @@ int test_memory() {
   assert(memstats_count_freelist_groups() == 1);
 
   free_block_group(one_block);
-  // after freeing, it should be merged with the existing group in the freelist
-  assert(memstats_count_freelist_groups() == 1);
+  // after freeing, the cluster should be freed completely
+  assert(memstats_count_freelist_groups() == 0);
 
   void *block1 = alloc_block_group(3);
   void *block2 = alloc_block_group(1);
   assert(block1 && block2);
-  assert(memstats_count_freelist_groups() == 3);
+  assert(memstats_count_freelist_groups() == 2);
 
   void *allocations[CLUSTER_MAX_BLOCKS];
   for (size_t i = 1; i < CLUSTER_MAX_BLOCKS; ++i) {
