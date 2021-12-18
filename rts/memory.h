@@ -146,6 +146,7 @@ static inline size_t block_group_count_free_bytes(struct block_descr *bdescr) {
 /// Remove from doubly-linked list
 static inline void dbl_link_remove(struct block_descr **head, struct block_descr *b) {
   if (head && *head == b) {
+    assert(b->back == NULL);
     *head = b->link;
   }
   if (b->link) {

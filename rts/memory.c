@@ -120,13 +120,16 @@ static void *split_block_group(void *start, size_t num_blocks) {
 static void add_to_freelist(void *start) {
   // TODO: coalesce adjacent empty block groups
   struct block_descr *bdesc = get_block_descr(start);
+
+  // make sure the bdescr is not already on the freelist:
+  // bdescrs on the freelist have their ->free set to NULL
   assert(bdesc->free);
+
   bdesc->free = NULL;
   size_t free_list_index = log2i(bdesc->num_blocks);
   assert(free_list_index < NUM_FREE_LISTS);
-  struct block_descr *old_head = rapid_mem.free_list[free_list_index];
-  rapid_mem.free_list[free_list_index] = bdesc;
-  bdesc->link = old_head;
+
+  dbl_link_insert(&rapid_mem.free_list[free_list_index], bdesc);
 }
 
 void free_block_group(void *start) {
@@ -144,6 +147,19 @@ void free_block_group(void *start) {
   add_to_freelist(start);
 }
 
+size_t memstats_count_freelist_groups() {
+  size_t num_freelist_groups = 0;
+  for(size_t i = 0; i < NUM_FREE_LISTS; ++i) {
+    struct block_descr *bdesc = rapid_mem.free_list[i];
+    while (bdesc) {
+      assert(bdesc->free == NULL);
+      num_freelist_groups++;
+      bdesc = bdesc->link;
+    }
+  }
+  return num_freelist_groups;
+}
+
 #define MAX_FREELIST_TRIES 16
 
 /**
@@ -159,8 +175,7 @@ static void *take_from_freelist(size_t num_blocks) {
   if (num_log2 < NUM_FREE_LISTS && rapid_mem.free_list[num_log2]) {
     struct block_descr *bdesc = rapid_mem.free_list[num_log2];
     assert(bdesc->free == 0);
-    rapid_mem.free_list[num_log2] = bdesc->link;
-    assert(bdesc->link == 0 || bdesc->link->free == 0);
+    dbl_link_remove(&rapid_mem.free_list[num_log2], bdesc);
 
     assert(bdesc->num_blocks > num_blocks);
     return split_block_group(bdesc->start, num_blocks);
@@ -172,13 +187,12 @@ static void *take_from_freelist(size_t num_blocks) {
 
   num_log2 = num_log2 - 1;
   if (num_log2 < NUM_FREE_LISTS && rapid_mem.free_list[num_log2]) {
-    struct block_descr **prev = &rapid_mem.free_list[num_log2];
     struct block_descr *bdesc = rapid_mem.free_list[num_log2];
     for(size_t i=0; i<MAX_FREELIST_TRIES && bdesc; bdesc=bdesc->link, ++i) {
       assert(bdesc->free == 0);
       if (bdesc->num_blocks >= num_blocks) {
-        *prev = bdesc->link;
         assert(bdesc->link == 0 || bdesc->link->free == 0);
+        dbl_link_remove(&rapid_mem.free_list[num_log2], bdesc);
 
         if (bdesc->num_blocks > num_blocks) {
           return split_block_group(bdesc->start, num_blocks);
@@ -187,7 +201,6 @@ static void *take_from_freelist(size_t num_blocks) {
           return bdesc->start;
         }
       }
-      prev = &bdesc->link;
     }
 
   }
@@ -269,6 +282,9 @@ static size_t test_big_static_array[4096];
 int test_memory() {
   rapid_memory_init();
 
+  // at the start there should be no groups in the freelist:
+  assert(memstats_count_freelist_groups() == 0);
+
   void *cluster1 = alloc_clusters(1);
   assert((uint64_t)cluster1 % CLUSTER_SIZE == 0);
   write_pattern(cluster1, CLUSTER_SIZE);
@@ -286,6 +302,17 @@ int test_memory() {
   assert(log2i(7) == 2);
   assert(log2i(8) == 3);
   assert(log2i(CLUSTER_MAX_BLOCKS) == NUM_FREE_LISTS - 1);
+
+  void *one_block = alloc_block_group(1);
+  assert(one_block);
+  struct block_descr *bdescr = get_block_descr(one_block);
+  assert(bdescr->num_blocks == 1);
+
+  // since we only alloced one block, the rest of the cluster should be in the
+  // freelist as one continuous group:
+  assert(memstats_count_freelist_groups() == 1);
+
+  free_block_group(one_block);
 
   void *allocations[CLUSTER_MAX_BLOCKS];
   for (size_t i = 1; i < CLUSTER_MAX_BLOCKS; ++i) {
