@@ -259,24 +259,10 @@ size_t memstats_count_freelist_groups() {
  * May return `NULL` if the freelist contains no suitable block group
  */
 static void *take_from_freelist(size_t num_blocks) {
-  // we first look in the bin that is one size class "larger" than our target
-  // group size, because that guarantees that any match will fit:
-  size_t num_log2 = log2i(num_blocks) + 1;
+  size_t num_log2 = log2i(num_blocks);
 
-  if (num_log2 < NUM_FREE_LISTS && rapid_mem.free_list[num_log2]) {
-    struct block_descr *bdesc = rapid_mem.free_list[num_log2];
-    assert(bdesc->free == 0);
-    dbl_link_remove(&rapid_mem.free_list[num_log2], bdesc);
-
-    assert(bdesc->num_blocks > num_blocks);
-    return split_block_group(bdesc->start, num_blocks);
-  }
-
-  if (num_log2 == 0) {
-    return NULL;
-  }
-
-  num_log2 = num_log2 - 1;
+  // The exact size class bucket may contain groups that are too small, so we
+  // only check the first MAX_FREELIST_TRIES entries and give up after that.
   if (num_log2 < NUM_FREE_LISTS && rapid_mem.free_list[num_log2]) {
     struct block_descr *bdesc = rapid_mem.free_list[num_log2];
     for(size_t i=0; i<MAX_FREELIST_TRIES && bdesc; bdesc=bdesc->link, ++i) {
@@ -293,9 +279,20 @@ static void *take_from_freelist(size_t num_blocks) {
         }
       }
     }
-
   }
 
+  // Look in increasingly bigger size classes, this may increase fragmentation
+  // slightly, but avoids needing to allocate new clusters repeatedly
+  for (size_t i = num_log2 + 1; i < NUM_FREE_LISTS; ++i) {
+    if (rapid_mem.free_list[i]) {
+      struct block_descr *bdesc = rapid_mem.free_list[i];
+      assert(bdesc->free == 0);
+      dbl_link_remove(&rapid_mem.free_list[i], bdesc);
+
+      assert(bdesc->num_blocks > num_blocks);
+      return split_block_group(bdesc->start, num_blocks);
+    }
+  }
 
   return NULL;
 }
@@ -410,7 +407,7 @@ int test_memory() {
   void *block1 = alloc_block_group(3);
   void *block2 = alloc_block_group(1);
   assert(block1 && block2);
-  assert(memstats_count_freelist_groups() == 2);
+  assert(memstats_count_freelist_groups() == 1);
 
   void *allocations[CLUSTER_MAX_BLOCKS];
   for (size_t i = 1; i < CLUSTER_MAX_BLOCKS; ++i) {
