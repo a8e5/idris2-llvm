@@ -260,6 +260,12 @@ static struct block_descr *gc_alloc_chain(size_t size) {
     struct block_descr *next_head = get_block_descr(mem);
     next_head->link = head;
     next_head->pending = next_head->start;
+    // Reset flags for all blocks (even "inner" blocks inside the group) in the
+    // nursery. Since objects may start anywhere in the group, we must provide
+    // (at least) valid ->flags for each bdescr.
+    for (size_t i = 0; i < next_head->num_blocks; ++i) {
+      (next_head + i)->flags = 0;
+    }
     allocated_size += block_group_get_size(next_head);
     head = next_head;
   } while (allocated_size < size);
