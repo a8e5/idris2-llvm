@@ -425,7 +425,6 @@ int test_memory() {
   }
 
   // check some non-heap objects
-  assert(!is_heap_alloc((void *)test_memory));
   assert(!is_heap_alloc(&rapid_mem));
   assert(!is_heap_alloc(test_big_static_array));
   assert(!is_heap_alloc(test_big_static_array + 512));
