@@ -9,6 +9,7 @@ packages:
   - gmake
   - gmp
   - llvm11
+  - ninja
   - py38-pip
 
 environment:
@@ -46,15 +47,14 @@ tasks:
       cd $(grealpath rapid)
       git submodule update --init --recursive
 
-      export IDRIS2_DATA="$PWD/support"
-
       gmake -C external/llvm-statepoint-utils dist/llvm-statepoint-tablegen.h unified
-      gmake
+
+      cmake -G Ninja .
+      ninja
 
   - test: |
       cd $(grealpath rapid)
-      export IDRIS2_DATA="$PWD/support"
-      gmake test
+      ninja test
 
 triggers:
   - action: email

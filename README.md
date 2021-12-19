@@ -25,14 +25,26 @@ check if that is the case, try the following command:
 
 GMP needs to be installed (`libgmp-dev` on Debian).
 
+You need CMake (>= 3.18) and Ninja, building with `make` is not supported.
+
 Make sure you have checked out the Git submodule as well:
 
     git submodule update --init --recursive
 
 ## Compilation
 
-    make
-    IDRIS2_DATA=$PWD/support make test
+Prepare the submodule:
+
+    make -C external/llvm-statepoint-utils dist/llvm-statepoint-tablegen.h unified
+
+Compile:
+
+    cmake -G Ninja .
+    ninja
+
+Run tests:
+
+    ninja test
 
 ## Usage
 
