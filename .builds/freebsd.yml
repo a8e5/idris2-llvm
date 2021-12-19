@@ -4,6 +4,7 @@ sources:
   - https://git.sr.ht/~cypheon/rapid
 
 packages:
+  - boehm-gc
   - cmake
   - coreutils
   - gmake
