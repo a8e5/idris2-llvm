@@ -31,6 +31,10 @@ function(add_idris_package TARGET_NAME IPKG_FILE)
     DEPENDS "${TARGET_EXECUTABLE_PATH}"
     )
 
+  set_target_properties(
+    "${TARGET_NAME}" PROPERTIES
+    ADDITIONAL_CLEAN_FILES "${IDRIS_BUILD_DIR}")
+
   set(${TARGET_NAME}_EXECUTABLE "${IDRIS_OUTPUT_DIR}/${TARGET_NAME}"
     PARENT_SCOPE)
 endfunction()
