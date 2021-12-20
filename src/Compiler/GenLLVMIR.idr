@@ -16,7 +16,6 @@ import Control.Codegen
 import Core.TT
 import Data.Utils
 import Libraries.Data.SortedMap
-import Protocol.Hex
 import Rapid.Common
 
 -- work around Idris issue #2032: Slow typechecking on Int operation when Data.Fin.fromInteger is in scope
