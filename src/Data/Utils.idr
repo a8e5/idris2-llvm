@@ -1,6 +1,7 @@
 module Data.Utils
 
 import Data.Bits
+import Data.Buffer
 import Data.Vect
 
 export
@@ -37,3 +38,23 @@ asHex n = pack $ asHex' n []
     asHex' : Bits64 -> List Char -> List Char
     asHex' 0 hex = hex
     asHex' n hex = asHex' (assert_smaller n (n `shiftR` 4)) (hexDigit (n .&. 0xf) :: hex)
+
+export
+asHex2 : Int -> String
+asHex2 0 = "00"
+asHex2 c = let s = asHex (cast {to=Bits64} c) in
+               if length s == 1 then "0" ++ s else s
+
+export
+doubleToHex : Double -> String
+doubleToHex d = let bytes = unsafePerformIO (do
+                                buf <- (assert_total $ fromMaybe $ idris_crash "no buf") <$> newBuffer 8
+                                setDouble buf 0 d
+                                bufferData buf
+                                ) in
+                                concatMap asHex2 $ reverse bytes
+
+export
+repeatStr : String -> Nat -> String
+repeatStr s 0 = ""
+repeatStr s (S x) = s ++ repeatStr s x

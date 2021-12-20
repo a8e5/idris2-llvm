@@ -1,7 +1,6 @@
 module Compiler.GenLLVMIR
 
 import Data.Bits
-import Data.Buffer
 import Data.Either
 import Data.List
 import Data.List1
@@ -12,6 +11,7 @@ import System.Info
 
 import Compiler.CompileExpr
 import Compiler.VMCode
+import Compiler.LLVM.IR
 import Control.Codegen
 import Core.TT
 import Data.Utils
@@ -71,41 +71,6 @@ CLOSURE_MAX_ARGS = 1024
 FAT_CLOSURE_LIMIT : Int
 FAT_CLOSURE_LIMIT = 8
 
-repeatStr : String -> Nat -> String
-repeatStr s 0 = ""
-repeatStr s (S x) = s ++ repeatStr s x
-
-fullShow : Name -> String
-fullShow (NS ns n) = showNSWithSep "." ns ++ "." ++ fullShow n
-fullShow (UN (Basic n)) = n
-fullShow (UN (Field n)) = "_.(" ++ n ++ ")"
-fullShow (UN Underscore) = "_"
-fullShow (MN n i) = "_{" ++ n ++ ":" ++ show i ++ "}"
-fullShow (PV n i) = "_{P:" ++ fullShow n ++ ":" ++ show i ++ "}"
-fullShow (DN _ n) = fullShow n
-fullShow (Nested (outer, idx) inner) = show outer ++ "/" ++ show idx ++ "/" ++ fullShow inner
-fullShow (CaseBlock outer i) = "case/" ++ outer ++ "$" ++ show i
-fullShow (WithBlock outer i) = "with/" ++ outer ++ "$" ++ show i
-fullShow (Resolved i) = "resolved/" ++ show i
-
-isSafeChar : Char -> Bool
-isSafeChar '.' = True
-isSafeChar '_' = True
-isSafeChar c = isAlphaNum c
-
-export
-safeName : Name -> String
-safeName s = concatMap okchar (unpack $ fullShow s)
-  where
-    okchar : Char -> String
-    okchar c = if isSafeChar c
-                  then cast c
-                  else "$" ++ asHex (cast {to=Bits64} c)
-
-interface ToIR a where
-  toIR : a -> String
-  showWithoutType : a -> String
-
 ToIR Reg where
   toIR (Loc i) = "%v" ++ show i
   toIR RVal = "%rval"
@@ -122,52 +87,6 @@ ToIR String where
 argIR : Reg -> Codegen String
 argIR (Loc i) = pure $ "%ObjPtr %v" ++ show i
 argIR _ = pure $ "undef"
-
-asHex2 : Int -> String
-asHex2 0 = "00"
-asHex2 c = let s = asHex (cast {to=Bits64} c) in
-               if length s == 1 then "0" ++ s else s
-
-doubleToHex : Double -> String
-doubleToHex d = let bytes = unsafePerformIO (do
-                                buf <- (assert_total $ fromMaybe $ idris_crash "no buf") <$> newBuffer 8
-                                setDouble buf 0 d
-                                bufferData buf
-                                ) in
-                                concatMap asHex2 $ reverse bytes
-
-mkVarName : String -> Codegen String
-mkVarName pfx = do
-  i <- getUnique
-  pure $ (pfx ++ show i)
-
-data Value = MkConst Int
-           | MkExtractValue Value Int
-
-assignSSA : ToIR a => a -> Codegen String
-assignSSA value = do
-  i <- getUnique
-  let varname = "%t" ++ show i
-  appendCode ("  " ++ varname ++ " = " ++ (toIR value))
-  pure varname
-
-data IRType = I1 | I8 | I16 | I32 | I64 | F64 | FuncPtr | IRObjPtr | Pointer Int IRType
-
-Show IRType where
-  show I1 = "i1"
-  show I8 = "i8"
-  show I16 = "i16"
-  show I32 = "i32"
-  show I64 = "i64"
-  show F64 = "double"
-  show FuncPtr = "%FuncPtr"
-  show IRObjPtr = "%ObjPtr"
-  show (Pointer i t) = (show t) ++ " addrspace(" ++ show i ++ ")*"
-
-data IRLabel = MkLabel String
-
-RuntimePtr : IRType
-RuntimePtr = Pointer 0 I8
 
 TARGET_SIZE_T : IRType
 TARGET_SIZE_T = I64
@@ -186,23 +105,6 @@ IEEE_DOUBLE_INF_POS   = 0x7ff0000000000000
 IEEE_DOUBLE_INF_NEG   : Bits64
 IEEE_DOUBLE_INF_NEG   = 0xfff0000000000000
 
-ToIR IRLabel where
-  toIR (MkLabel l) = "label %" ++ l
-  showWithoutType (MkLabel l) = "%" ++ l
-
-beginLabel : IRLabel -> Codegen ()
-beginLabel (MkLabel l) = appendCode (l ++ ":")
-
-genLabel : String -> Codegen IRLabel
-genLabel s = MkLabel <$> mkVarName ("glbl_" ++ s)
-
-data IRValue : IRType -> Type where
-  Const : (t : IRType) -> Integer -> IRValue t
-  ConstI64 : Integer -> IRValue I64
-  ConstF64 : Double -> IRValue F64
-  SSA : (t : IRType) ->  String -> IRValue t
-  IRDiscard : IRValue (Pointer 0 IRObjPtr)
-
 globalHpVar : IRValue (Pointer 0 RuntimePtr)
 globalHpVar = SSA (Pointer 0 RuntimePtr) "%HpVar"
 
@@ -211,20 +113,6 @@ globalHpLimVar = SSA (Pointer 0 RuntimePtr) "%HpLimVar"
 
 globalRValVar : IRValue (Pointer 0 IRObjPtr)
 globalRValVar = SSA (Pointer 0 IRObjPtr) "%rvalVar"
-
-total
-ToIR (IRValue t) where
-  toIR {t} (SSA t s) = (show t) ++ " " ++ s
-  toIR (Const t i) = (show t) ++ " " ++ (show i)
-  toIR (ConstI64 i) = "i64 " ++ (show i)
-  toIR (ConstF64 f) = "double 0x" ++ (assert_total $ doubleToHex f)
-  toIR (IRDiscard) = "ERROR: trying to use DISCARD with type"
-
-  showWithoutType (SSA _ n) = n
-  showWithoutType (Const _ i) = show i
-  showWithoutType (ConstI64 i) = show i
-  showWithoutType (ConstF64 f) = "0x" ++ (assert_total $ doubleToHex f)
-  showWithoutType (IRDiscard) = "ERROR: trying to use DISCARD without type"
 
 HEADER_SIZE : IRValue I64
 HEADER_SIZE = (Const I64 8)
@@ -238,12 +126,7 @@ reg2val (Loc i) = SSA (Pointer 0 IRObjPtr) ("%v" ++ show i ++ "Var")
 reg2val RVal = SSA (Pointer 0 IRObjPtr) ("%rvalVar")
 reg2val Discard = IRDiscard
 
-nullPtr : IRValue IRObjPtr
-nullPtr = SSA IRObjPtr "null"
-
 load : {t : IRType} -> IRValue (Pointer n t) -> Codegen (IRValue t)
--- can be changed to undef if we're not in SAFE mode
---load IRDiscard = pure $ SSA IRObjPtr "undef"
 load IRDiscard = pure nullPtr
 load {t} mv = do
   loaded <- assignSSA $ "load " ++ (show t) ++ ", " ++ (toIR mv)
