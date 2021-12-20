@@ -698,6 +698,7 @@ ObjPtr rapid_system_dir_next_entry(Idris_TSO *base, ObjPtr dirPtrObj, ObjPtr _wo
   }
 
   DIR *d = *(DIR **)OBJ_PAYLOAD(dirPtrObj);
+  errno = 0;
   struct dirent *de = readdir(d);
 
   if (de == NULL) {
