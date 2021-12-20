@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include <dirent.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +13,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 
 #include <gmp.h>
 
@@ -55,12 +57,12 @@ void rapid_strreverse(char *restrict dst, const char *restrict src, int64_t size
 }
 
 int64_t idris_rts_bits64_to_str(char *dst, uint64_t val) {
-  int64_t size = snprintf(dst, 24, "%llu", val);
+  int64_t size = snprintf(dst, 24, "%" PRIu64, val);
   return size;
 }
 
 int64_t idris_rts_int_to_str(char *dst, int64_t val) {
-  int64_t size = snprintf(dst, 24, "%lld", val);
+  int64_t size = snprintf(dst, 24, "%" PRId64, val);
   return size;
 }
 
@@ -178,13 +180,18 @@ ObjPtr rapid_system_popen(Idris_TSO *base, ObjPtr cmdStrObj, ObjPtr modeStrObj, 
   return wrapFilePtr(base, child);
 }
 
-void rapid_system_pclose(Idris_TSO *base, ObjPtr filePtrObj, ObjPtr _world) {
+uint64_t rapid_system_pclose(Idris_TSO *base, ObjPtr filePtrObj, ObjPtr _world) {
   if (OBJ_TYPE(filePtrObj) != OBJ_TYPE_OPAQUE || OBJ_SIZE(filePtrObj) != POINTER_SIZE) {
     rapid_C_crash("invalid object passed to system_pclose");
   }
 
   FILE *f = *(FILE **)OBJ_PAYLOAD(filePtrObj);
-  pclose(f);
+  int result = pclose(f);
+
+  if (!WIFEXITED(result)) {
+    rapid_C_crash("pclose failed");
+  }
+  return WEXITSTATUS(result);
 }
 
 void rapid_system_free(Idris_TSO *base, ObjPtr ptrObj, ObjPtr _world) {
@@ -698,6 +705,7 @@ ObjPtr rapid_system_dir_next_entry(Idris_TSO *base, ObjPtr dirPtrObj, ObjPtr _wo
   }
 
   DIR *d = *(DIR **)OBJ_PAYLOAD(dirPtrObj);
+  errno = 0;
   struct dirent *de = readdir(d);
 
   if (de == NULL) {

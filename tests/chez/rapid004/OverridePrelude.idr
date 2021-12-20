@@ -7,5 +7,5 @@ import Data.String
 main : IO ()
 main = do
   putStrLn $ fastPack ['a', 'b', 'c']
-  putStrLn $ fastAppend ["first part", "|", "", "|", "END of the string"]
+  putStrLn $ fastConcat ["first part", "|", "", "|", "END of the string"]
   putStrLn $ fastConcat ["last", "part", "empty", ""]

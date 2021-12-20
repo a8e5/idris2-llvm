@@ -16,7 +16,7 @@ import Control.Codegen
 import Core.TT
 import Data.Utils
 import Libraries.Data.SortedMap
-import Libraries.Utils.Hex
+import Protocol.Hex
 import Rapid.Common
 
 -- work around Idris issue #2032: Slow typechecking on Int operation when Data.Fin.fromInteger is in scope
@@ -3480,7 +3480,7 @@ getVMIR opts conNames (i, (n, MkVMForeign cs args ret)) =
 getVMIR _ _ (i, (n, MkVMError is)) = ""
 
 funcPtrTypes : String
-funcPtrTypes = fastAppend $ map funcPtr (rangeFromTo 0 FAT_CLOSURE_LIMIT) where
+funcPtrTypes = fastConcat $ map funcPtr (rangeFromTo 0 FAT_CLOSURE_LIMIT) where
   funcPtr : Int -> String
   funcPtr i = "%FuncPtrArgs" ++ (show (i + 1)) ++ " = type %Return1 (%RuntimePtr, %TSOPtr, %RuntimePtr" ++ repeatStr ", %ObjPtr" (integerToNat $ cast (i+1)) ++ ")*\n"
 
@@ -3581,7 +3581,7 @@ applyClosureHelperFunc = do
 
 export
 closureHelper : CompileOpts -> String
-closureHelper opts = fastAppend [
+closureHelper opts = fastConcat [
   funcPtrTypes,
   "\ndefine fastcc %Return1 @idris_apply_closure(%RuntimePtr %HpArg, %TSOPtr %BaseArg, %RuntimePtr %HpLimArg, %ObjPtr %closureObjArg, %ObjPtr %argumentObjArg) gc \"statepoint-example\" {\n",
   runCodegen opts applyClosureHelperFunc,

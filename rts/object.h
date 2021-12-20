@@ -1,6 +1,7 @@
 #pragma once
 
 #include <assert.h>
+#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -127,7 +128,7 @@ static inline uint32_t OBJ_TOTAL_SIZE(ObjPtr p) {
       // 8 byte header + 2 * 64 bits for seconds & nanoseconds)
       return 8 + 16;
     default:
-      fprintf(stderr, "unknown object type: 0x%08llx\n", (h>>32));
+      fprintf(stderr, "unknown object type: 0x%08lx\n", (unsigned long)(h>>32));
       rapid_C_crash("unknown object type");
       return -1;
   }

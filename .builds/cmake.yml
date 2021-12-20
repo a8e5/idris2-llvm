@@ -35,13 +35,19 @@ tasks:
       tar xzvf /tmp/idris2_prebuilt.tar.gz
       idris2 --version
 
+  - add-swap: |
+      sudo fallocate --length 4G /usr/swap0
+      sudo chmod 600 /usr/swap0
+      sudo mkswap /usr/swap0
+      sudo swapon /usr/swap0
+
   - build: |
       cd rapid
       git submodule update --init --recursive
 
       make -C external/llvm-statepoint-utils dist/llvm-statepoint-tablegen.h unified
       cmake -G Ninja .
-      ninja
+      ninja -j 1
 
   - test: |
       cd rapid
