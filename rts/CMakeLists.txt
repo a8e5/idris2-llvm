@@ -57,6 +57,7 @@ add_custom_command(
   COMMAND clang ARGS "-c" "-o" "${RAPID_PLATFORM_LIB}.o" ${RAPID_PLATFORM_SOURCE}
   COMMAND llvm-ar ARGS rcsu "${RAPID_PLATFORM_LIB}" "${RAPID_PLATFORM_LIB}.o"
   DEPENDS ${RAPID_PLATFORM_SOURCE}
+  BYPRODUCTS "${RAPID_PLATFORM_LIB}.o"
   )
 
 add_custom_target(rapid_rts ALL
