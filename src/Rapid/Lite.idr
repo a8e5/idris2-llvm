@@ -66,7 +66,7 @@ main = do
     then do
       let optimized = optimize allFunctions
       let optSexp = map dumpDef (optimized)
-      ignore $ writeFile (filename ++ ".opt.sexp") (fastAppend optSexp)
+      ignore $ writeFile (filename ++ ".opt.sexp") (fastConcat optSexp)
       pure optimized
     else do
       pure allFunctions

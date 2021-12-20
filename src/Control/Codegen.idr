@@ -70,4 +70,4 @@ addMetadata i v = do
 export
 runCodegen : CompileOpts -> Codegen () -> String
 runCodegen o r = let (MkCGBuf _ _ cs ls errors) = fst $ runState (emptyCG o) r in
-                     fastAppend $ intersperse "\n" $ (map (\(n,v) => n ++ " = " ++ v) $ reverse cs) ++ reverse ls
+                     fastConcat $ intersperse "\n" $ (map (\(n,v) => n ++ " = " ++ v) $ reverse cs) ++ reverse ls
