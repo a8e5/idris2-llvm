@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,7 +19,7 @@ void idris_mkcon_ok(ObjPtr o) {
 }
 
 void idris_mkcon_arg_ok(ObjPtr o, int64_t idx) {
-  fprintf(stderr, "MKCON arg ok: %lld -> %p\n", idx, (void *)OBJ_GET_SLOT(o, idx));
+  fprintf(stderr, "MKCON arg ok: %ld -> %p\n", (long)idx, (void *)OBJ_GET_SLOT(o, idx));
   dump_obj_i(OBJ_GET_SLOT(o, idx), 0);
 }
 
@@ -34,7 +35,7 @@ int dump_obj_i(ObjPtr o, int indent) {
     INDENT(indent); fprintf(stderr, "    (not a real object)\n");
     return 0;
   }
-  INDENT(indent); fprintf(stderr, "header: 0x%016llx\n", o->hdr);
+  INDENT(indent); fprintf(stderr, "header: 0x%016" PRIx64 "\n", o->hdr);
   if (OBJ_IS_FWD_INPLACE(o)) {
     INDENT(indent); fprintf(stderr, "    (in place fwd) %p -> %p\n", (void *)o, (void *) (o->hdr << 1));
     return 0;
@@ -59,7 +60,7 @@ int dump_obj_i(ObjPtr o, int indent) {
     }
   }
   if (OBJ_TYPE(o) == OBJ_TYPE_INT) {
-    INDENT(indent); fprintf(stderr, "INT value: %lld\n", (int64_t)OBJ_GET_SLOT(o, 0));
+    INDENT(indent); fprintf(stderr, "INT value: %" PRId64 "\n", (int64_t)OBJ_GET_SLOT(o, 0));
   }
   if (OBJ_TYPE(o) == OBJ_TYPE_STRING) {
     uint32_t strsize = OBJ_SIZE(o);
@@ -83,9 +84,9 @@ int dump_obj(ObjPtr o) {
 }
 
 void idris_rts_crash_typecheck(ObjPtr obj, int64_t expectedType) {
-  fprintf(stderr, "Object failed typecheck, expected type: %04llx\n", expectedType);
+  fprintf(stderr, "Object failed typecheck, expected type: %04x\n", (int)expectedType);
   fprintf(stderr, "  object address: %p\n", (void *)obj);
-  fprintf(stderr, "  object header:  0x%016llx\n", obj->hdr);
+  fprintf(stderr, "  object header:  0x%016" PRIx64 "\n", obj->hdr);
   dump_obj(obj);
   exit(123);
 }

@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include <dirent.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -56,12 +57,12 @@ void rapid_strreverse(char *restrict dst, const char *restrict src, int64_t size
 }
 
 int64_t idris_rts_bits64_to_str(char *dst, uint64_t val) {
-  int64_t size = snprintf(dst, 24, "%llu", val);
+  int64_t size = snprintf(dst, 24, "%" PRIu64, val);
   return size;
 }
 
 int64_t idris_rts_int_to_str(char *dst, int64_t val) {
-  int64_t size = snprintf(dst, 24, "%lld", val);
+  int64_t size = snprintf(dst, 24, "%" PRId64, val);
   return size;
 }
 
