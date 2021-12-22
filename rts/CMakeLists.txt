@@ -28,6 +28,11 @@ else()
 endif()
 list(APPEND RTS_CFLAGS "-Wall" "-Wpedantic" "-Werror" "-Wno-error=format")
 
+set(RAPID_GC_STATS_ENABLED OFF CACHE BOOL "Print GC stats at program exit")
+if (RAPID_GC_STATS_ENABLED)
+  list(APPEND RTS_CFLAGS "-DRAPID_GC_STATS_ENABLED")
+endif()
+
 foreach(FILE ${RTS_INCLUDES})
   list(APPEND RTS_INCLUDE_FLAGS "-I" "${FILE}")
 endforeach()
