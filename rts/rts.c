@@ -107,7 +107,12 @@ int rts_main(int argc, char **argv) {
   fprintf(stderr, "alloc total:  %15llu bytes\n"        , tso->gc_stats.allocated_bytes_total);
   fprintf(stderr, "collect total:%15llu bytes\n"        , tso->gc_stats.collected_bytes_total);
   fprintf(stderr, "total pauses: %15.3lf seconds\n"      , tso->gc_stats.pause_ns_total / 1000000000.0 );
-  fprintf(stderr, "max pause:    %15.3lf seconds\n"        , tso->gc_stats.pause_ns_max / 1000000000.0 );
+  fprintf(stderr, "max pause:    %15.0lf milliseconds\n"        , tso->gc_stats.pause_ns_max / 1000000.0 );
+  if (tso->gc_stats.gc_count) {
+    fprintf(stderr, "avg pause:    %15.0lf milliseconds\n"        , tso->gc_stats.pause_ns_total / tso->gc_stats.gc_count / 1000000.0 );
+  } else {
+    fprintf(stderr, "avg pause:    %15s milliseconds\n"        , "N/A");
+  }
 #endif
 
   return 0;
