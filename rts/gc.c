@@ -277,14 +277,11 @@ static void gc_free_chain(struct block_descr *head) {
   while (bdesc) {
     struct block_descr *next = bdesc->link;
 
-#ifndef NDEBUG
     // Set links to NULL to signal that this block was removed from its chain.
-    // Since this assertion is only verified in DEBUG mode, we don't need to
-    // overwrite the ->link and ->back pointers in RELEASE builds, as they are
-    // both overwritten by free_block_group() shortly after.
+    // ->link will be overwritten by free_block_group() shortly after, but for
+    // consistency it should still be set to NULL beforehand.
     bdesc->link = NULL;
     bdesc->back = NULL;
-#endif // NDEBUG
 
     free_block_group(bdesc->start);
     bdesc = next;
