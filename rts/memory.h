@@ -19,7 +19,6 @@ void rapid_memory_init();
 
 void *alloc_clusters(size_t count);
 void free_clusters(void *p);
-bool is_heap_alloc(void *p);
 
 void *alloc_block_group(size_t num_blocks);
 void free_block_group(void *p);
@@ -196,4 +195,16 @@ static inline struct block_descr *list_pop(struct block_descr **head) {
     result->link = NULL;
   }
   return result;
+}
+
+/**
+ * Find out if a given memory address is managed by this memory manager
+ *
+ * Iff is_heap_alloc(X) returns `true`, it is safe to dereference the result of
+ * the call `get_block_descr(X)`
+ */
+static inline bool is_heap_alloc(void *addr) {
+  uint64_t cluster_start = (uint64_t)(addr) & CLUSTER_CLUSTER_MASK;
+  uint64_t memarea = cluster_start >> CLUSTER_SHIFT;
+  return hashset_is_member(rapid_mem.all_clusters, (void *)memarea);
 }
