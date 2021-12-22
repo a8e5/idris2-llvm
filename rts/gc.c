@@ -479,8 +479,7 @@ void idris_rts_gc(Idris_TSO *base, uint8_t *sp) {
 #ifdef RAPID_GC_STATS_ENABLED
   base->gc_stats.gc_count += 1;
 
-  base->gc_stats.allocated_bytes_total += oldNurseryUsed - current_heap_used;
-  base->gc_stats.copied_bytes_total += current_heap_used;
+  base->gc_stats.copied_bytes_total += base->used_nursery_size;
 
   struct timespec end_time;
   clock_gettime(CLOCK_MONOTONIC, &end_time);
@@ -528,6 +527,9 @@ void idris_rts_gc(Idris_TSO *base, uint8_t *sp) {
 void
 idris_rts_more_heap(Idris_TSO *base, uint8_t *sp) {
   assert(base->heap_alloc <= BLOCK_SIZE && "more heap does not support big objects");
+#ifdef RAPID_GC_STATS_ENABLED
+  base->gc_stats.allocated_bytes_total += block_group_get_size(base->nurseryCur);
+#endif
   // fast path
   if (base->nurseryCur->link) {
     // switch to next block group
@@ -544,6 +546,9 @@ idris_rts_more_heap(Idris_TSO *base, uint8_t *sp) {
 ObjPtr
 idris_rts_alloc_large(Idris_TSO *base, uint8_t *sp, uint64_t size) {
   assert(size > BLOCK_SIZE && "small allocation requested via rts_alloc_large");
+#ifdef RAPID_GC_STATS_ENABLED
+  base->gc_stats.allocated_bytes_total += size;
+#endif
   return alloc_large_obj(0, size);
 }
 
