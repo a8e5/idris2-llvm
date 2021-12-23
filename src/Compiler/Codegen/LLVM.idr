@@ -81,7 +81,7 @@ compile defs tmpDir outputDir term outfile = do
     | Left err => (coreLift_ $ fPutStrLn stderr err) >> (pure Nothing)
   coreLift_ $ fPutStrLn stderr ("selected GC strategy: " ++ show gc)
 
-  let opts = MkCompileOpts debug False gc os
+  let opts = MkCompileOpts debug False gc os 0
 
   -- load supporting files first, so we can fail early
   support <- readDataFile $ "rapid" </> "support.ll"

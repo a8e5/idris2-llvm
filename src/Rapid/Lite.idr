@@ -71,6 +71,6 @@ main = do
     else do
       pure allFunctions
 
-  let opts = MkCompileOpts debug False Statepoint os
+  let opts = MkCompileOpts debug False Statepoint os 0
 
   writeIR optimizedFunctions support (filename ++ ".output.ll") opts

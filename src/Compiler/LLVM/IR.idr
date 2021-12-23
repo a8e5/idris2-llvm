@@ -1,6 +1,6 @@
 module Compiler.LLVM.IR
 
-import Core.TT
+import Core.Name
 
 import Control.Codegen
 import Data.Utils
@@ -106,3 +106,7 @@ ToIR (IRValue t) where
 export
 nullPtr : IRValue IRObjPtr
 nullPtr = SSA IRObjPtr "null"
+
+export
+pConst : Cast a Integer => {ty : IRType} -> a -> IRValue ty
+pConst {ty} val = Const ty (cast {to=Integer} val)

@@ -3,6 +3,8 @@ module Data.Sexp
 import Data.List
 import Data.String
 
+import Data.Utils
+
 %default total
 
 public export
@@ -47,13 +49,6 @@ safeShow s = fastPack ('"' :: reverse ('"' :: safeShow' (unpack s) []))
       if safeCharInQuotes c
          then safeShow' rest (c::acc)
          else safeShow' rest (reverseOnto acc (escapeChar c))
-
-showSep : String -> List String -> String
-showSep sep xs = showSepGo True xs "" where
-  showSepGo : Bool -> List String -> String -> String
-  showSepGo first [] acc = acc
-  showSepGo first (x::xs) acc = if first then showSepGo False xs (acc ++ x)
-                                         else showSepGo False xs (acc ++ " " ++ x)
 
 export
 Show Sexp where

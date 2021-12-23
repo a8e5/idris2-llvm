@@ -29,3 +29,4 @@ record CompileOpts where
   traceEnabled : Bool
   gcFlavour : GCFlavour
   targetOS : String
+  constNamespace : Int

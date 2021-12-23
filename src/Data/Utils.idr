@@ -11,6 +11,13 @@ enumerateVect l = enumerate' 0 l where
   enumerate' _ [] = []
   enumerate' i (x::xs) = (i, x)::(enumerate' (i+1) xs)
 
+export
+enumerate : List a -> List (Int, a)
+enumerate l = enumerate' 0 l where
+  enumerate' : Int -> List a -> List (Int, a)
+  enumerate' _ [] = []
+  enumerate' i (x::xs) = (i, x)::(enumerate' (i+1) xs)
+
 hexDigit : Bits64 -> Char
 hexDigit 0 = '0'
 hexDigit 1 = '1'
@@ -58,3 +65,11 @@ export
 repeatStr : String -> Nat -> String
 repeatStr s 0 = ""
 repeatStr s (S x) = s ++ repeatStr s x
+
+export
+showSep : String -> List String -> String
+showSep sep xs = showSepGo True xs "" where
+  showSepGo : Bool -> List String -> String -> String
+  showSepGo first [] acc = acc
+  showSepGo first (x::xs) acc = if first then showSepGo False xs (acc ++ x)
+                                         else showSepGo False xs (acc ++ sep ++ x)

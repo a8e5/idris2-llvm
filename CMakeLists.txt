@@ -11,7 +11,13 @@ add_custom_target(test)
 
 add_idris_package(rapid-lite rapid-lite.ipkg
   src/Compiler/GenLLVMIR.idr
+  src/Compiler/LLVM/Instruction.idr
   src/Compiler/LLVM/IR.idr
+  src/Compiler/LLVM/Rapid/Builtin.idr
+  src/Compiler/LLVM/Rapid/Foreign.idr
+  src/Compiler/LLVM/Rapid/Integer.idr
+  src/Compiler/LLVM/Rapid/Object.idr
+  src/Compiler/LLVM/Rapid/String.idr
   src/Compiler/Optimize.idr
   src/Compiler/PrepareCode.idr
   src/Compiler/VMCodeSexp.idr
@@ -29,7 +35,13 @@ add_idris_package(rapidc rapidc.ipkg
   src/Compiler/Codegen/LLVM.idr
   src/Compiler/Codegen/VmcodeSexp.idr
   src/Compiler/GenLLVMIR.idr
+  src/Compiler/LLVM/Instruction.idr
   src/Compiler/LLVM/IR.idr
+  src/Compiler/LLVM/Rapid/Builtin.idr
+  src/Compiler/LLVM/Rapid/Foreign.idr
+  src/Compiler/LLVM/Rapid/Integer.idr
+  src/Compiler/LLVM/Rapid/Object.idr
+  src/Compiler/LLVM/Rapid/String.idr
   src/Compiler/PrepareCode.idr
   src/Compiler/VMCodeSexp.idr
   src/Control/Codegen.idr

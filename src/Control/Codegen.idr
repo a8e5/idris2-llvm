@@ -42,11 +42,11 @@ getUnique = do
   pure i
 
 export
-addConstant : Int -> String -> Codegen String
-addConstant i v = do
+addConstant : String -> Codegen String
+addConstant v = do
   ci <- getUnique
-  let name = "@glob_" ++ show i ++ "_c" ++ show ci
   (MkCGBuf o i c l e) <- get
+  let name = "@glob_" ++ show (o.constNamespace) ++ "_c" ++ show ci
   put (MkCGBuf o i ((name, v)::c) l e)
   pure name
 
@@ -58,14 +58,24 @@ addError msg = do
   put $ trace ("add error: " ++ msg) (MkCGBuf o i c l (msg::e))
 
 export
-addMetadata : Int -> String -> Codegen String
-addMetadata i v = do
+addMetadata : String -> Codegen String
+addMetadata v = do
+  i <- (.constNamespace) <$> getOpts
   u <- getUnique
   let mdId = u * 0x10000 + i
   let name = "!" ++ show mdId
   (MkCGBuf o i c l e) <- get
   put (MkCGBuf o i ((name, v)::c) l e)
   pure name
+
+export
+appendMetadata : String -> Codegen String
+appendMetadata value = do
+  o <- (.constNamespace) <$> getOpts
+  i <- getUnique
+  let varname = "!" ++ show (i * 1000000 + o)
+  appendCode ("  " ++ varname ++ " = " ++ value)
+  pure varname
 
 export
 mkVarName : String -> Codegen String
