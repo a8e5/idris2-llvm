@@ -1,5 +1,7 @@
 module Compiler.LLVM.Rapid.Object
 
+import Data.Vect
+
 import Control.Codegen
 import Compiler.LLVM.IR
 import Compiler.LLVM.Instruction
@@ -86,6 +88,12 @@ getObjectHeader : IRValue IRObjPtr -> Codegen (IRValue I64)
 getObjectHeader obj = do
   headerPtr <- SSA (Pointer 1 I64) <$> assignSSA ("getelementptr inbounds %Object, " ++ (toIR obj) ++ ", i32 0, i32 0")
   load headerPtr
+
+export
+getObjectSize : IRValue IRObjPtr -> Codegen (IRValue I32)
+getObjectSize obj = do
+  hdr <- getObjectHeader obj
+  mkTrunc {to=I32} hdr
 
 export
 putObjectHeader : IRValue IRObjPtr -> IRValue I64 -> Codegen ()
@@ -178,3 +186,177 @@ assertObjectType' o t = when TRACE $ do
   appendCode $ "call ccc void @idris_rts_crash_typecheck(" ++ showSep ", " [toIR o, toIR tVal] ++ ") noreturn"
   appendCode $ "unreachable"
   beginLabel typeOk
+
+export
+cgMkChar : IRValue I32 -> Codegen (IRValue IRObjPtr)
+cgMkChar val = do
+  newObj <- dynamicAllocate (ConstI64 0)
+  header <- mkHeader OBJECT_TYPE_ID_CHAR val
+  putObjectHeader newObj header
+  pure newObj
+
+export
+unboxChar' : IRValue IRObjPtr -> Codegen (IRValue I32)
+unboxChar' src = do
+  charHdr <- getObjectHeader src
+  pure !(mkTrunc charHdr)
+
+export
+mkCon : Int -> List (IRValue IRObjPtr) -> Codegen (IRValue IRObjPtr)
+mkCon tag args = do
+  newObj <- dynamicAllocate (ConstI64 $ cast (8 * (length args)))
+  -- TODO: add object type to header for GC
+  hdr <- mkHeader OBJECT_TYPE_ID_CON_NO_ARGS (pConst tag)
+  hdrWithArgCount <- mkOr hdr (Const I64 ((cast $ length args) `prim__shl_Integer` 40))
+  putObjectHeader newObj hdrWithArgCount
+  let enumArgs = enumerate args
+  for_ enumArgs (\x => let (i, arg) = x in do
+                            assertObjectTypeAny arg (cast i+1)
+                            putObjectSlot newObj (ConstI64 $ cast i) arg
+                          )
+  pure newObj
+
+export
+cgMkDouble : IRValue F64 -> Codegen (IRValue IRObjPtr)
+cgMkDouble val = do
+  newObj <- dynamicAllocate (ConstI64 8)
+  putObjectHeader newObj (constHeader OBJECT_TYPE_ID_DOUBLE 0)
+  putObjectSlot newObj (ConstI64 0) val
+  pure newObj
+
+export
+cgMkConstDouble : Int -> Double -> Codegen (IRValue IRObjPtr)
+cgMkConstDouble i d = do
+  let newHeader = constHeader OBJECT_TYPE_ID_DOUBLE 0
+  let typeSignature = "{i64, double}"
+  cName <- addConstant i $ "private unnamed_addr addrspace(1) constant " ++ typeSignature ++ " {" ++ toIR newHeader ++ ", double 0x" ++ (assert_total $ doubleToHex d) ++ "}, align 8"
+  pure $ SSA IRObjPtr $ "bitcast (" ++ typeSignature ++ " addrspace(1)* " ++ cName ++ " to %ObjPtr)"
+
+export
+cgMkDoubleFromBits : IRValue I64 -> Codegen (IRValue IRObjPtr)
+cgMkDoubleFromBits val = do
+  newObj <- dynamicAllocate (ConstI64 8)
+  putObjectHeader newObj (constHeader OBJECT_TYPE_ID_DOUBLE 0)
+  putObjectSlot newObj (Const I64 0) val
+  pure newObj
+
+export
+unboxFloat64 : IRValue (Pointer 0 IRObjPtr) -> Codegen (IRValue F64)
+unboxFloat64 src = getObjectSlot {t=F64} !(load src) 0
+
+export
+unboxFloat64' : IRValue IRObjPtr -> Codegen (IRValue F64)
+unboxFloat64' src = getObjectSlot {t=F64} src 0
+
+export
+cgMkInt : IRValue I64 -> Codegen (IRValue IRObjPtr)
+cgMkInt val = do
+  boxed <- assignSSA $ "tail call fastcc noalias %ObjPtr @llvm.rapid.boxint(" ++ toIR val ++ ") \"gc-leaf-function\""
+  pure (SSA IRObjPtr boxed)
+
+export
+unboxInt' : IRValue IRObjPtr -> Codegen (IRValue I64)
+unboxInt' src = SSA I64 <$> assignSSA ("tail call fastcc i64 @llvm.rapid.unboxint(" ++ toIR src ++ ") \"gc-leaf-function\"")
+
+export
+cgMkBits64 : IRValue I64 -> Codegen (IRValue IRObjPtr)
+cgMkBits64 val = do
+  newObj <- dynamicAllocate (ConstI64 8)
+  putObjectHeader newObj (constHeader OBJECT_TYPE_ID_BITS64 0)
+  putObjectSlot newObj (ConstI64 0) val
+  pure newObj
+
+-- TODO: change to List Bits8
+utf8EncodeChar : Char -> List Int
+utf8EncodeChar c = let codepoint = cast {to=Int} c
+                       bor = prim__or_Int
+                       band = prim__and_Int
+                       shr = prim__shr_Int in
+                       map id $
+                       if codepoint <= 0x7f then [codepoint]
+                       else if codepoint <= 0x7ff then [
+                         bor 0xc0 (codepoint `shr` 6),
+                         bor 0x80 (codepoint `band` 0x3f)
+                         ]
+                       else if codepoint <= 0xffff then [
+                         bor 0xe0 (codepoint `shr` 12),
+                         bor 0x80 ((codepoint `shr` 6) `band` 0x3f),
+                         bor 0x80 ((codepoint `shr` 0) `band` 0x3f)
+                         ]
+                       else [
+                         bor 0xf0 (codepoint `shr` 18),
+                         bor 0x80 ((codepoint `shr` 12) `band` 0x3f),
+                         bor 0x80 ((codepoint `shr` 6) `band` 0x3f),
+                         bor 0x80 ((codepoint `shr` 0) `band` 0x3f)
+                         ]
+
+utf8EncodeString : String -> List Int
+utf8EncodeString s = concatMap utf8EncodeChar $ unpack s
+
+getStringIR : List Int -> String
+getStringIR utf8bytes = concatMap okchar utf8bytes
+  where
+    okchar : Int -> String
+    -- c >= ' ' && c <= '~' && c /= '\\' && c /= '"'
+    okchar c = if c >= 32 && c <= 126 && c /= 92 && c /= 34
+                  then cast $ cast {to=Char} c
+                  else "\\" ++ asHex2 c
+
+export
+mkStr : Int -> String -> Codegen (IRValue IRObjPtr)
+mkStr i s = do
+  let utf8bytes = utf8EncodeString s
+  let len = length utf8bytes
+  let newHeader = constHeader OBJECT_TYPE_ID_STR (cast len)
+  let typeSignature = "{i64, [" ++ show len ++ " x i8]}"
+  cName <- addConstant i $ "private unnamed_addr addrspace(1) constant " ++ typeSignature ++ " {" ++ toIR newHeader ++ ", [" ++ show len ++ " x i8] c\"" ++ (getStringIR utf8bytes) ++ "\"}, align 8"
+  pure $ SSA IRObjPtr $ "bitcast (" ++ typeSignature ++ " addrspace(1)* " ++ cName ++ " to %ObjPtr)"
+
+export
+getStringByteLength : IRValue IRObjPtr -> Codegen (IRValue I32)
+getStringByteLength = getObjectSize
+
+export
+getStringLength : IRValue IRObjPtr -> Codegen (IRValue I32)
+getStringLength strObj = do
+  strLenBytes <- getStringByteLength strObj
+  call {t=I32} "ccc" "@utf8_bytes_to_codepoints" [toIR !(getObjectPayloadAddr {t=I8} strObj), toIR strLenBytes]
+
+export
+mkUnit : Codegen (IRValue IRObjPtr)
+mkUnit = mkCon 0 []
+
+{- Runtime-related stuff, might fit into own module -}
+export
+globalHpVar : IRValue (Pointer 0 RuntimePtr)
+globalHpVar = SSA (Pointer 0 RuntimePtr) "%HpVar"
+
+export
+globalHpLimVar : IRValue (Pointer 0 RuntimePtr)
+globalHpLimVar = SSA (Pointer 0 RuntimePtr) "%HpLimVar"
+
+export
+globalRValVar : IRValue (Pointer 0 IRObjPtr)
+globalRValVar = SSA (Pointer 0 IRObjPtr) "%rvalVar"
+
+export
+funcEntry : Codegen ()
+funcEntry = do
+  appendCode "%HpVar = alloca %RuntimePtr\n"
+  appendCode "%HpLimVar = alloca %RuntimePtr\n"
+  appendCode "%rvalVar = alloca %ObjPtr\n"
+  store (SSA RuntimePtr "%HpArg") globalHpVar
+  store (SSA RuntimePtr "%HpLimArg") globalHpLimVar
+  store nullPtr globalRValVar
+
+export
+funcReturn : Codegen ()
+funcReturn = do
+  finHp <- load globalHpVar
+  finHpLim <- load globalHpLimVar
+  finRVal <- load globalRValVar
+
+  ret1 <- assignSSA $ "insertvalue %Return1 undef, " ++ toIR finHp ++ ", 0"
+  ret2 <- assignSSA $ "insertvalue %Return1 " ++ ret1 ++ ", " ++ toIR finHpLim ++ ", 1"
+  ret3 <- assignSSA $ "insertvalue %Return1 " ++ ret2 ++ ", " ++ toIR finRVal ++ ", 2"
+  appendCode $ "ret %Return1 " ++ ret3

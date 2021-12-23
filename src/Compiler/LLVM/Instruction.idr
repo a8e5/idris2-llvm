@@ -157,6 +157,57 @@ jump to =
   appendCode $ "br " ++ toIR to
 
 export
+mkIf_ : (cond : Codegen (IRValue I1)) ->
+        (true : Codegen ()) ->
+        (false : Codegen ()) ->
+        Codegen ()
+mkIf_ cond true false = do
+  lblTrue <- genLabel "t"
+  lblTrueEnd <- genLabel "te"
+  lblFalse <- genLabel "f"
+  lblFalseEnd <- genLabel "fe"
+  lblEnd <- genLabel "e"
+
+  branch !(cond) lblTrue lblFalse
+  beginLabel lblTrue
+  true
+  jump lblTrueEnd
+  beginLabel lblTrueEnd
+  jump lblEnd
+  beginLabel lblFalse
+  false
+  jump lblFalseEnd
+  beginLabel lblFalseEnd
+  jump lblEnd
+  beginLabel lblEnd
+
+mkIf : {t : IRType} ->
+       (cond : Codegen (IRValue I1)) ->
+       (true : Codegen (IRValue t)) ->
+       (false : Codegen (IRValue t)) ->
+               Codegen (IRValue t)
+mkIf cond true false = do
+  lblTrue <- genLabel "t"
+  lblTrueEnd <- genLabel "te"
+  lblFalse <- genLabel "f"
+  lblFalseEnd <- genLabel "fe"
+  lblEnd <- genLabel "e"
+
+  branch !(cond) lblTrue lblFalse
+  beginLabel lblTrue
+  valTrue <- true
+  jump lblTrueEnd
+  beginLabel lblTrueEnd
+  jump lblEnd
+  beginLabel lblFalse
+  valFalse <- false
+  jump lblFalseEnd
+  beginLabel lblFalseEnd
+  jump lblEnd
+  beginLabel lblEnd
+  phi [(valTrue, lblTrueEnd), (valFalse, lblFalseEnd)]
+
+export
 mkSelect : {t : IRType} -> IRValue I1 -> IRValue t -> IRValue t -> Codegen (IRValue t)
 mkSelect {t} s a b = do
   (SSA t) <$> assignSSA ("select " ++ toIR s ++ ", " ++ toIR a ++ ", " ++ toIR b)
