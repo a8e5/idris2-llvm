@@ -1,8 +1,8 @@
 module Compiler.LLVM.Rapid.Foreign
 
 import Data.List
-import Data.Vect
 import Data.String
+import Data.Vect
 
 import Compiler.CompileExpr
 import Compiler.VMCode

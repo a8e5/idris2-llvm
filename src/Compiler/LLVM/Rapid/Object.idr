@@ -328,6 +328,13 @@ mkUnit = mkCon 0 []
 
 {- Runtime-related stuff, might fit into own module -}
 export
+mkRuntimeCrash : String -> Codegen ()
+mkRuntimeCrash s = do
+  msg <- mkStr s
+  appendCode $ "  call ccc void @idris_rts_crash_msg(" ++ toIR msg ++ ") noreturn"
+  appendCode $ "unreachable"
+
+export
 globalHpVar : IRValue (Pointer 0 RuntimePtr)
 globalHpVar = SSA (Pointer 0 RuntimePtr) "%HpVar"
 
