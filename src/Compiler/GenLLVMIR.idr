@@ -121,9 +121,6 @@ funcReturn = do
   ret3 <- assignSSA $ "insertvalue %Return1 " ++ ret2 ++ ", " ++ toIR finRVal ++ ", 2"
   appendCode $ "ret %Return1 " ++ ret3
 
-header : Int -> Integer
-header i = (cast i) `prim__shl_Integer` 32
-
 mkIf : {t : IRType} ->
        (cond : Codegen (IRValue I1)) ->
        (true : Codegen (IRValue t)) ->
@@ -177,7 +174,7 @@ mkIf_ cond true false = do
 cgMkChar : IRValue I32 -> Codegen (IRValue IRObjPtr)
 cgMkChar val = do
   newObj <- dynamicAllocate (ConstI64 0)
-  header <- mkAddNoWrap !(mkZext val) (ConstI64 $ header OBJECT_TYPE_ID_CHAR)
+  header <- mkHeader OBJECT_TYPE_ID_CHAR val
   putObjectHeader newObj header
   pure newObj
 
@@ -189,7 +186,7 @@ cgMkInt val = do
 cgMkBits64 : IRValue I64 -> Codegen (IRValue IRObjPtr)
 cgMkBits64 val = do
   newObj <- dynamicAllocate (ConstI64 8)
-  putObjectHeader newObj (ConstI64 $ header OBJECT_TYPE_ID_BITS64)
+  putObjectHeader newObj (constHeader OBJECT_TYPE_ID_BITS64 0)
   putObjectSlot newObj (ConstI64 0) val
   pure newObj
 
@@ -227,9 +224,9 @@ cgMkConstInteger i val =
       let (len ** limbs) = getLimbs absVal
       let len32 = cast {to=Bits32} $ cast {to=Int} len
       let lenForHeader = if (val >= 0) then len32 else (twosComplement len32)
-      let newHeader = (header OBJECT_TYPE_ID_BIGINT) + (cast lenForHeader)
+      let newHeader = constHeader OBJECT_TYPE_ID_BIGINT lenForHeader
       let typeSignature = "{i64, [" ++ show len ++ " x %LimbT]}"
-      cName <- addConstant i $ "private unnamed_addr addrspace(1) constant " ++ typeSignature ++ " {i64 " ++ show newHeader ++ ", [" ++ show len ++ " x %LimbT] [" ++ (getLimbsIR limbs) ++ "]}, align 8"
+      cName <- addConstant i $ "private unnamed_addr addrspace(1) constant " ++ typeSignature ++ " {" ++ toIR newHeader ++ ", [" ++ show len ++ " x %LimbT] [" ++ (getLimbsIR limbs) ++ "]}, align 8"
       pure $ SSA IRObjPtr $ "bitcast (" ++ typeSignature ++ " addrspace(1)* " ++ cName ++ " to %ObjPtr)"
   where
       getLimbs : Integer -> (n:Nat ** Vect n Integer)
@@ -248,7 +245,7 @@ cgMkIntegerSigned val = do
   isZero <- icmp "eq" val (Const I64 0)
   newSize1 <- mkSelect isNegative (Const I32 (-1)) (Const I32 1)
   newSize <- mkSelect isZero (Const I32 0) newSize1
-  newHeader <- mkOr (Const I64 $ (header OBJECT_TYPE_ID_BIGINT)) !(mkZext newSize)
+  newHeader <- mkHeader OBJECT_TYPE_ID_BIGINT newSize
   newSizeAbs <- mkAbs newSize
   allocSize <- mkMul !(mkZext newSizeAbs) (Const I64 GMP_LIMB_SIZE)
   newObj <- dynamicAllocate allocSize
@@ -262,21 +259,21 @@ cgMkIntegerSigned val = do
 cgMkDouble : IRValue F64 -> Codegen (IRValue IRObjPtr)
 cgMkDouble val = do
   newObj <- dynamicAllocate (ConstI64 8)
-  putObjectHeader newObj (ConstI64 $ header OBJECT_TYPE_ID_DOUBLE)
+  putObjectHeader newObj (constHeader OBJECT_TYPE_ID_DOUBLE 0)
   putObjectSlot newObj (ConstI64 0) val
   pure newObj
 
 cgMkConstDouble : Int -> Double -> Codegen (IRValue IRObjPtr)
 cgMkConstDouble i d = do
-  let newHeader = header OBJECT_TYPE_ID_DOUBLE
+  let newHeader = constHeader OBJECT_TYPE_ID_DOUBLE 0
   let typeSignature = "{i64, double}"
-  cName <- addConstant i $ "private unnamed_addr addrspace(1) constant " ++ typeSignature ++ " {i64 " ++ show newHeader ++ ", double 0x" ++ (assert_total $ doubleToHex d) ++ "}, align 8"
+  cName <- addConstant i $ "private unnamed_addr addrspace(1) constant " ++ typeSignature ++ " {" ++ toIR newHeader ++ ", double 0x" ++ (assert_total $ doubleToHex d) ++ "}, align 8"
   pure $ SSA IRObjPtr $ "bitcast (" ++ typeSignature ++ " addrspace(1)* " ++ cName ++ " to %ObjPtr)"
 
 cgMkDoubleFromBits : IRValue I64 -> Codegen (IRValue IRObjPtr)
 cgMkDoubleFromBits val = do
   newObj <- dynamicAllocate (ConstI64 8)
-  putObjectHeader newObj (Const I64 $ header OBJECT_TYPE_ID_DOUBLE)
+  putObjectHeader newObj (constHeader OBJECT_TYPE_ID_DOUBLE 0)
   putObjectSlot newObj (Const I64 0) val
   pure newObj
 
@@ -418,10 +415,10 @@ mkSubstring strObj startIndexRaw length = do
 mkStr : Int -> String -> Codegen (IRValue IRObjPtr)
 mkStr i s = do
   let utf8bytes = utf8EncodeString s
-  let len = cast {to=Integer} $ length utf8bytes
-  let newHeader = (header OBJECT_TYPE_ID_STR) + len
+  let len = length utf8bytes
+  let newHeader = constHeader OBJECT_TYPE_ID_STR (cast len)
   let typeSignature = "{i64, [" ++ show len ++ " x i8]}"
-  cName <- addConstant i $ "private unnamed_addr addrspace(1) constant " ++ typeSignature ++ " {i64 " ++ show newHeader ++ ", [" ++ show len ++ " x i8] c\"" ++ (getStringIR utf8bytes) ++ "\"}, align 8"
+  cName <- addConstant i $ "private unnamed_addr addrspace(1) constant " ++ typeSignature ++ " {" ++ toIR newHeader ++ ", [" ++ show len ++ " x i8] c\"" ++ (getStringIR utf8bytes) ++ "\"}, align 8"
   pure $ SSA IRObjPtr $ "bitcast (" ++ typeSignature ++ " addrspace(1)* " ++ cName ++ " to %ObjPtr)"
 
 mkRuntimeCrash : Int -> String -> Codegen ()
@@ -464,9 +461,6 @@ intToBits64' val = do
   ival <- unboxInt' val
   truncatedVal <- mkAnd (Const I64 0xffffffffffffffff) ival
   cgMkBits64 truncatedVal
-
-intToBits64 : IRValue (Pointer 0 IRObjPtr) -> Codegen (IRValue IRObjPtr)
-intToBits64 src = intToBits64' !(load src)
 
 unboxIntegerUnsigned : IRValue IRObjPtr -> Codegen (IRValue I64)
 unboxIntegerUnsigned integerObj = do
@@ -668,7 +662,7 @@ mkCon : Int -> List Reg -> Codegen (IRValue IRObjPtr)
 mkCon tag args = do
   newObj <- dynamicAllocate (ConstI64 $ cast (8 * (length args)))
   -- TODO: add object type to header for GC
-  hdr <- mkOr (Const I64 $ header OBJECT_TYPE_ID_CON_NO_ARGS) (ConstI64 $ cast tag)
+  hdr <- mkHeader OBJECT_TYPE_ID_CON_NO_ARGS (pConst tag)
   hdrWithArgCount <- mkOr hdr (Const I64 ((cast $ length args) `prim__shl_Integer` 40))
   putObjectHeader newObj hdrWithArgCount
   let enumArgs = enumerate args
@@ -943,7 +937,7 @@ genericCast fromType toType dest src =
     newStr <- dynamicAllocate (ConstI64 24)
     strPayload <- getObjectPayloadAddr {t=I8} newStr
     length <- (SSA I64) <$> assignSSA ("call ccc i64 @idris_rts_int_to_str(" ++ toIR strPayload ++ ", " ++ toIR ival ++ ")")
-    newHeader <- mkOr (ConstI64 $ header OBJECT_TYPE_ID_STR) length
+    newHeader <- mkHeader OBJECT_TYPE_ID_STR !(mkTrunc length)
     putObjectHeader newStr newHeader
     store newStr (reg2val dest)
 
@@ -1059,8 +1053,8 @@ addInteger i1 i2 = do
       putObjectSlot newObj size1 carry
       absRealNewSize <- mkAdd size1 carry
       signedNewSize <- mkSelect i1Negative !(mkSub (Const I64 0) absRealNewSize) absRealNewSize
-      signedNewSize32 <- mkAnd (Const I64 0xffffffff) signedNewSize
-      newHeader <- mkOr (Const I64 $ (header OBJECT_TYPE_ID_BIGINT)) signedNewSize32
+      signedNewSize32 <- mkTrunc {to=I32} signedNewSize
+      newHeader <- mkHeader OBJECT_TYPE_ID_BIGINT signedNewSize32
       putObjectHeader newObj newHeader
       pure newObj
 
@@ -1103,15 +1097,15 @@ subInteger i1 i2 = do
         ]
       resultIsNegative <- mkXOr swapped i1Negative
       signedNewSize <- mkSelect resultIsNegative !(mkSub (Const I64 0) absRealNewSize) absRealNewSize
-      signedNewSize32 <- mkAnd (Const I64 0xffffffff) signedNewSize
-      newHeader <- mkOr (Const I64 $ (header OBJECT_TYPE_ID_BIGINT)) signedNewSize32
+      signedNewSize32 <- mkTrunc {to=I32} signedNewSize
+      newHeader <- mkHeader OBJECT_TYPE_ID_BIGINT signedNewSize32
       putObjectHeader newObj newHeader
       pure newObj
 
 integer0 : Codegen (IRValue IRObjPtr)
 integer0 = do
   newObj <- dynamicAllocate (Const I64 0)
-  putObjectHeader newObj (Const I64 $ (header OBJECT_TYPE_ID_BIGINT))
+  putObjectHeader newObj (constHeader OBJECT_TYPE_ID_BIGINT 0)
   pure newObj
 
 andInteger : IRValue IRObjPtr -> IRValue IRObjPtr -> Codegen (IRValue IRObjPtr)
@@ -1230,10 +1224,7 @@ mulInteger i1 i2 = do
       zero1 <- icmp "eq" s1 (Const I32 0)
       zero2 <- icmp "eq" s2 (Const I32 0)
       resultIsZero <- mkOr zero1 zero2
-      mkIf (pure resultIsZero) (do
-           newObj <- dynamicAllocate (Const I64 0)
-           putObjectHeader newObj (Const I64 $ (header OBJECT_TYPE_ID_BIGINT))
-           pure newObj) (do
+      mkIf (pure resultIsZero) {- then -} integer0 {- else -} (do
         sx <- mkXOr s1 s2
         signsMatch <- icmp "sge" sx (Const I32 0)
         s1a <- mkAbs s1
@@ -1260,8 +1251,8 @@ mulInteger i1 i2 = do
           toIR newLength
           ]
         signedNewSize <- mkSelect signsMatch absRealNewSize !(mkSub (Const I64 0) absRealNewSize)
-        signedNewSize32 <- mkAnd (Const I64 0xffffffff) signedNewSize
-        newHeader <- mkOr (Const I64 $ (header OBJECT_TYPE_ID_BIGINT)) signedNewSize32
+        signedNewSize32 <- mkTrunc {to=I32} signedNewSize
+        newHeader <- mkHeader OBJECT_TYPE_ID_BIGINT signedNewSize32
         putObjectHeader newObj newHeader
         pure newObj)
 
@@ -1288,8 +1279,7 @@ divInteger constI i1 i2 = do
   branch zero1 retZeroLbl checkDividendLbl
 
   beginLabel retZeroLbl
-  zeroInteger <- dynamicAllocate (Const I64 0)
-  putObjectHeader zeroInteger (Const I64 $ (header OBJECT_TYPE_ID_BIGINT))
+  zeroInteger <- integer0
   jump endLbl
 
   beginLabel checkDividendLbl
@@ -1297,8 +1287,7 @@ divInteger constI i1 i2 = do
   branch dividendLarger dividendLargerLbl divLbl
 
   beginLabel dividendLargerLbl
-  zeroQuotient <- dynamicAllocate (Const I64 0)
-  putObjectHeader zeroQuotient (Const I64 $ (header OBJECT_TYPE_ID_BIGINT))
+  zeroQuotient <- integer0
   jump endLbl
 
   beginLabel divLbl
@@ -1310,7 +1299,7 @@ divInteger constI i1 i2 = do
   let maxLimbsRemainder = s2a
   remainder <- dynamicAllocate !(mkMul (Const I64 GMP_LIMB_SIZE) maxLimbsRemainder)
   -- object must have a valid header, because the next allocation might trigger a GC
-  tempHeader <- mkOr (Const I64 $ (header OBJECT_TYPE_ID_BIGINT)) maxLimbsRemainder
+  tempHeader <- mkHeader OBJECT_TYPE_ID_BIGINT !(mkTrunc maxLimbsRemainder)
   putObjectHeader remainder tempHeader
 
   maxLimbsQuotient <- mkMax (Const I64 1) !(mkAdd (Const I64 1) !(mkSub s1a s2a))
@@ -1330,8 +1319,8 @@ divInteger constI i1 i2 = do
     toIR maxLimbsQuotient
     ]
   signedNewSize <- mkSelect signsMatch qRealNewSize !(mkSub (Const I64 0) qRealNewSize)
-  signedNewSize32 <- mkAnd (Const I64 0xffffffff) signedNewSize
-  newHeader <- mkOr (Const I64 $ (header OBJECT_TYPE_ID_BIGINT)) signedNewSize32
+  signedNewSize32 <- mkTrunc {to=I32} signedNewSize
+  newHeader <- mkHeader OBJECT_TYPE_ID_BIGINT signedNewSize32
   putObjectHeader quotient newHeader
 
   i1negative <- icmp "slt" s1 (Const I32 0)
@@ -1340,8 +1329,8 @@ divInteger constI i1 i2 = do
     toIR maxLimbsRemainder
     ]
   signedNewSize <- mkSelect i1negative !(mkSub (Const I64 0) rRealNewSize) rRealNewSize
-  signedNewSize32 <- mkAnd (Const I64 0xffffffff) signedNewSize
-  newHeader <- mkOr (Const I64 $ (header OBJECT_TYPE_ID_BIGINT)) signedNewSize32
+  signedNewSize32 <- mkTrunc {to=I32} signedNewSize
+  newHeader <- mkHeader OBJECT_TYPE_ID_BIGINT signedNewSize32
   putObjectHeader remainder newHeader
 
   jump endLbl
@@ -1435,7 +1424,7 @@ getInstIR i (OP r StrAppend [r1, r2]) = do
   l2 <- mkBinOp "and" (ConstI64 0xffffffff) h2
   newLength <- mkAddNoWrap l1 l2
   newStr <- dynamicAllocate newLength
-  newHeader <- mkBinOp "or" newLength (ConstI64 $ header OBJECT_TYPE_ID_STR)
+  newHeader <- mkHeader OBJECT_TYPE_ID_STR !(mkTrunc newLength)
 
   str1 <- getObjectPayloadAddr {t=I8} o1
   str2 <- getObjectPayloadAddr {t=I8} o2
@@ -1456,7 +1445,7 @@ getInstIR i (OP r StrReverse [r1]) = do
   hdr <- getObjectHeader strObj
   length <- mkBinOp "and" (ConstI64 0xffffffff) hdr
   newStr <- dynamicAllocate length
-  newHeader <- mkBinOp "or" length (ConstI64 $ header OBJECT_TYPE_ID_STR)
+  newHeader <- mkHeader OBJECT_TYPE_ID_STR !(mkTrunc length)
 
   origPayload <- getObjectPayloadAddr {t=I8} strObj
   newStrPayload <- getObjectPayloadAddr {t=I8} newStr
@@ -1540,11 +1529,11 @@ getInstIR i (OP r (Cast IntegerType StringType) [r1]) = do
       maxDigitsWithSign <- mkAdd maxDigits needsSign
 
       newStr <- dynamicAllocate maxDigitsWithSign
-      newHeader <- mkOr (ConstI64 $ header OBJECT_TYPE_ID_STR) maxDigitsWithSign
+      newHeader <- mkHeader OBJECT_TYPE_ID_STR !(mkTrunc maxDigitsWithSign)
       putObjectHeader newStr newHeader
 
       actualDigits <- call {t=I64} "ccc" "@rapid_bigint_get_str" [toIR newStr, toIR i1, "i32 10"]
-      actualLengthHeader <- mkOr (ConstI64 $ header OBJECT_TYPE_ID_STR) actualDigits
+      actualLengthHeader <- mkHeader OBJECT_TYPE_ID_STR !(mkTrunc actualDigits)
       putObjectHeader newStr actualLengthHeader
 
       store newStr (reg2val r)
@@ -1558,7 +1547,7 @@ getInstIR i (OP r (Cast Bits64Type StringType) [r1]) = do
   newStr <- dynamicAllocate (ConstI64 24)
   strPayload <- getObjectPayloadAddr {t=I8} newStr
   length <- (SSA I64) <$> assignSSA ("call ccc i64 @idris_rts_bits64_to_str(" ++ toIR strPayload ++ ", " ++ toIR theBits ++ ")")
-  newHeader <- mkOr (ConstI64 $ header OBJECT_TYPE_ID_STR) length
+  newHeader <- mkHeader OBJECT_TYPE_ID_STR !(mkTrunc length)
   putObjectHeader newStr newHeader
   store newStr (reg2val r)
 getInstIR i (OP r (Cast DoubleType StringType) [r1]) = do
@@ -1573,7 +1562,7 @@ getInstIR i (OP r (Cast DoubleType StringType) [r1]) = do
   newStr <- dynamicAllocate lengthPlus1
   strPayload <- getObjectPayloadAddr {t=I8} newStr
   length <- (SSA I64) <$> assignSSA ("call ccc i64 @idris_rts_double_to_str(" ++ toIR strPayload ++ ", " ++ toIR lengthPlus1 ++ ", " ++ toIR theDouble ++ ")")
-  newHeader <- mkOr (ConstI64 $ header OBJECT_TYPE_ID_STR) length
+  newHeader <- mkHeader OBJECT_TYPE_ID_STR !(mkTrunc length)
   putObjectHeader newStr newHeader
   store newStr (reg2val r)
 getInstIR i (OP r (Cast DoubleType IntegerType) [r1]) = do
@@ -1586,11 +1575,7 @@ getInstIR i (OP r (Cast DoubleType IntegerType) [r1]) = do
   isSmallerThanOne <- icmp "ult" exponent (Const I64 1023)
   returnZero <- mkOr isInfOrNaN isSmallerThanOne
 
-  newObj <- mkIf (pure returnZero) (do
-    newObj <- dynamicAllocate (Const I64 0)
-    putObjectHeader newObj (Const I64 $ (header OBJECT_TYPE_ID_BIGINT))
-    pure newObj
-    ) {- else -} (do
+  newObj <- mkIf (pure returnZero) {- then -} integer0 {- else -} (do
     fraction <- mkAnd (Const I64 $ cast IEEE_DOUBLE_MASK_FRAC) floatBitsAsI64
     -- highest bit is sign bit in both, Double and I64, so we can just use that one
     isNegative <- icmp "slt" floatBitsAsI64 (Const I64 0)
@@ -1613,8 +1598,8 @@ getInstIR i (OP r (Cast DoubleType IntegerType) [r1]) = do
         toIR !(mkTrunc {to=I32} toShift)
       ]
       signedNewSize <- mkSelect isNegative !(mkSub (Const I64 0) absRealNewSize) absRealNewSize
-      size32 <- mkAnd (Const I64 0xffffffff) signedNewSize
-      newHeader <- mkOr (Const I64 $ (header OBJECT_TYPE_ID_BIGINT)) size32
+      size32 <- mkTrunc {to=I32} signedNewSize
+      newHeader <- mkHeader OBJECT_TYPE_ID_BIGINT size32
       putObjectHeader newObj newHeader
       pure newObj
       ) (do
@@ -1622,9 +1607,8 @@ getInstIR i (OP r (Cast DoubleType IntegerType) [r1]) = do
         toShiftRight <- mkSub (Const I64 0) toShift
         shifted <- mkShiftR initial toShiftRight
         putObjectSlot newObj (Const I64 0) shifted
-        signedNewSize <- mkSelect isNegative (Const I32 (-1)) (Const I32 1)
-        size64 <- mkZext signedNewSize
-        newHeader <- mkOr (Const I64 $ (header OBJECT_TYPE_ID_BIGINT)) size64
+        signedNewSize32 <- mkSelect isNegative (Const I32 (-1)) (Const I32 1)
+        newHeader <- mkHeader OBJECT_TYPE_ID_BIGINT signedNewSize32
         putObjectHeader newObj newHeader
         pure newObj
       )
@@ -2145,13 +2129,13 @@ getInstIR {conNames} i (MKCON r (Right n) args) = do
        Nothing => addError $ "MKCON name not found: " ++ show n
 
 getInstIR i (MKCLOSURE r n missingN args) = do
-  let missing = cast {to=Integer} missingN
-  let len = cast {to=Integer} $ length args
+  let missing = cast {to=Int} missingN
+  let len = cast {to=Int} $ length args
   let totalArgsExpected = missing + len
   if totalArgsExpected > (cast CLOSURE_MAX_ARGS) then addError $ "ERROR : too many closure arguments: " ++ show totalArgsExpected ++ " > " ++ show CLOSURE_MAX_ARGS else do
-  let header = (header OBJECT_TYPE_ID_CLOSURE) + (missing * 0x10000) + len
-  newObj <- dynamicAllocate $ ConstI64 (8 + 8 * len)
-  putObjectHeader newObj (ConstI64 $ header)
+  let header = constHeader OBJECT_TYPE_ID_CLOSURE (cast ((missing * 0x10000) + len))
+  newObj <- dynamicAllocate (Const I64 $ cast (8 + 8 * len))
+  putObjectHeader newObj header
   funcPtr <- (if (totalArgsExpected <= (cast FAT_CLOSURE_LIMIT))
              then
                assignSSA $ "bitcast %FuncPtrArgs" ++ show totalArgsExpected ++ " @" ++ (safeName n) ++ " to %FuncPtr"
@@ -2332,7 +2316,7 @@ compileExtPrim i (NS ns n) r args with (unsafeUnfoldNamespace ns)
     elem <- load (reg2val elemReg)
     size <- mkMul (Const I64 8) count
     newObj <- dynamicAllocate size
-    hdr <- mkOr count (Const I64 $ header OBJECT_TYPE_ID_IOARRAY)
+    hdr <- mkHeader OBJECT_TYPE_ID_IOARRAY !(mkTrunc count)
     putObjectHeader newObj hdr
     jump lblStart
     beginLabel lblStart
@@ -2455,7 +2439,7 @@ mk_prim__bufferNew : Vect 2 (IRValue IRObjPtr) -> Codegen ()
 mk_prim__bufferNew [sizeObj, _] = do
   size <- unboxInt' sizeObj
   -- TODO: safety check: size < 2^32
-  hdrValue <- mkOr (ConstI64 $ header OBJECT_TYPE_ID_BUFFER) size
+  hdrValue <- mkHeader OBJECT_TYPE_ID_BUFFER !(mkTrunc size)
   newObj <- dynamicAllocate size
   putObjectHeader newObj hdrValue
   store newObj (reg2val RVal)
@@ -2602,7 +2586,7 @@ mk_prim__bufferGetString [buf, offsetObj, lengthObj, _] = do
   bytePtr <- getElementPtr payloadStart offset
 
   newStr <- dynamicAllocate length
-  newHeader <- mkBinOp "or" length (ConstI64 $ header OBJECT_TYPE_ID_STR)
+  newHeader <- mkHeader OBJECT_TYPE_ID_STR !(mkTrunc length)
   putObjectHeader newStr newHeader
   strPayload <- getObjectPayloadAddr {t=I8} newStr
   appendCode $ "  call void @llvm.memcpy.p1i8.p1i8.i64(" ++ toIR strPayload ++ ", " ++ toIR bytePtr ++ ", " ++ toIR length ++ ", i1 false)"
@@ -2668,19 +2652,11 @@ mk_prim__noop2 : Vect 2 (IRValue IRObjPtr) -> Codegen ()
 mk_prim__noop2 [_, _] = do
   store !(mkUnit) (reg2val RVal)
 
-mk_prim__isBuffer : Vect 1 (IRValue IRObjPtr) -> Codegen ()
-mk_prim__isBuffer [obj] = do
-  hdr <- getObjectHeader obj
-  objType <- mkAnd (ConstI64 0xffffffff00000000) hdr
-  isBuf <- icmp "ne" objType (ConstI64 $ header OBJECT_TYPE_ID_BUFFER)
-  result <- cgMkInt !(mkZext isBuf)
-  store result (reg2val RVal)
-
 mk_prim__currentDir : Vect 1 (IRValue IRObjPtr) -> Codegen ()
 mk_prim__currentDir [_] = do
   dummy <- mkStr 1 "/tmp"
   newPtr <- dynamicAllocate (Const I64 8)
-  putObjectHeader newPtr (Const I64 $ header $ OBJECT_TYPE_ID_POINTER)
+  putObjectHeader newPtr (constHeader OBJECT_TYPE_ID_POINTER 0)
   putObjectSlot newPtr (Const I64 0) dummy
   store newPtr (reg2val RVal)
 
@@ -3123,17 +3099,16 @@ applyClosureHelperFunc = do
   assertObjectType' closureObj OBJECT_TYPE_ID_CLOSURE
 
   closureHeader <- getObjectHeader closureObj
-  argCount <- assignSSA $ "and i64 65535, " ++ showWithoutType closureHeader
-  missingArgCountShifted <- assignSSA $ "and i64 4294901760, " ++ showWithoutType closureHeader
-  missingArgCount <- assignSSA $ "lshr i64 " ++ missingArgCountShifted ++ ", 16"
-  isSaturated <- assignSSA $ "icmp eq i64 1, " ++ missingArgCount
-  labelName <- mkVarName "closure_saturated"
+  argCount <- mkTrunc !(mkAnd (pConst 0xffff) closureHeader)
+  missingArgCountShifted <- mkAnd (pConst 0xffff0000) closureHeader
+  missingArgCount <- mkTrunc !(mkShiftR missingArgCountShifted (pConst 16))
+  isSaturated <- icmp "eq" (pConst 1) missingArgCount
+  lblSaturated <- genLabel "closure_saturated"
   lblUnsaturated <- genLabel "closure_unsaturated"
-  appendCode $ "br i1 " ++ isSaturated ++ ", label %" ++ labelName ++ "_yes, " ++ toIR lblUnsaturated
-  appendCode $ labelName ++ "_yes:"
+  branch isSaturated lblSaturated lblUnsaturated
+  beginLabel lblSaturated
 
   funcPtrAdd <- getObjectSlotAddrVar {t=FuncPtr} closureObj (Const I64 0)
-  --funcPtr <- getObjectSlot {t=FuncPtr} closureObj 0
   funcPtr <- getObjectSlot {t=FuncPtr} closureObj 0
 
   let hp = "%RuntimePtr %HpArg"
@@ -3146,8 +3121,8 @@ applyClosureHelperFunc = do
   -- if the closure requires a total number of arguments <= FAT_CLOSURE_LIMIT
   -- (i.e. storedArgs <= (FAT_CLOSURE_LIMIT - 1)), it is invoked directly
   -- otherwise it is called via its "$$closureEntry" function
-  appendCode $ "  switch i64 " ++ argCount ++ ", " ++ toIR lblApplyViaClosureEntry ++ " [\n  " ++
-  (showSep "\n  " $ (flip map) (rangeFromTo 0 (maxArgs - 1)) (\i => "i64 " ++ show i ++ ", label %" ++ applyClosure ++ "_" ++ show i)) ++
+  appendCode $ "  switch " ++ toIR argCount ++ ", " ++ toIR lblApplyViaClosureEntry ++ " [\n  " ++
+  (showSep "\n  " $ (flip map) (rangeFromTo 0 (maxArgs - 1)) (\i => "i32 " ++ show i ++ ", label %" ++ applyClosure ++ "_" ++ show i)) ++
   "]"
 
   for_ (rangeFromTo 0 (maxArgs - 1)) (\numberOfStoredArgs => do
@@ -3166,31 +3141,29 @@ applyClosureHelperFunc = do
 
   beginLabel lblUnsaturated
 
-  appliedArgCount <- mkAddNoWrap (SSA I64 argCount) (ConstI64 1)
-  newArgsSize <- mkMul appliedArgCount (ConstI64 8)
+  appliedArgCount <- mkAddNoWrap argCount (Const I32 1)
+  newArgsSize <- mkMul appliedArgCount (Const I32 8)
   -- add 8 bytes for entry func ptr
-  newPayloadSize <- mkAddNoWrap newArgsSize (ConstI64 8)
+  newPayloadSize <- mkAddNoWrap !(mkZext newArgsSize) (ConstI64 8)
   -- old payload size is new payload size - 8
-  let oldPayloadSize = newArgsSize
+  oldPayloadSize <- mkZext {to=I64} newArgsSize
 
   newClosure <- dynamicAllocate newPayloadSize
 
-  let newHeader = ConstI64 $ header OBJECT_TYPE_ID_CLOSURE
-  newMissingArgs <- mkSub (SSA I64 missingArgCount) (ConstI64 1)
-  newMissingArgsShifted <- mkBinOp "shl" newMissingArgs (ConstI64 16)
-
-  newHeader' <- mkOr newHeader newMissingArgsShifted
-  newHeader'' <- mkOr newHeader' appliedArgCount
+  newMissingArgs <- mkSub missingArgCount (Const I32 1)
+  newMissingArgsShifted <- mkBinOp "shl" newMissingArgs (Const I32 16)
+  newMissingAndAppliedArgs <- mkOr newMissingArgsShifted appliedArgCount
+  newHeader <- mkHeader OBJECT_TYPE_ID_CLOSURE newMissingAndAppliedArgs
 
   oldPayloadPtr <- getObjectPayloadAddr {t=I8} closureObj
   newPayloadPtr <- getObjectPayloadAddr {t=I8} newClosure
 
   appendCode $ "  call void @llvm.memcpy.p1i8.p1i8.i64(" ++ toIR newPayloadPtr ++ ", " ++ toIR oldPayloadPtr ++ ", " ++ toIR oldPayloadSize ++ ", i1 false)"
 
-  let newArgSlotNumber = appliedArgCount
+  newArgSlotNumber <- mkZext appliedArgCount
   putObjectSlot newClosure newArgSlotNumber argValue
 
-  putObjectHeader newClosure newHeader''
+  putObjectHeader newClosure newHeader
 
   store newClosure (reg2val RVal)
 

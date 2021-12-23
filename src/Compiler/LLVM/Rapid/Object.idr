@@ -98,6 +98,11 @@ mkHeader : Int -> IRValue I32 -> Codegen (IRValue I64)
 mkHeader objType sizeOrTag =
   mkOr (Const I64 $ (cast objType) `prim__shl_Integer` 32) !(mkZext sizeOrTag)
 
+export
+constHeader : Int -> Bits32 -> IRValue I64
+constHeader objType sizeOrTag =
+  Const I64 $ cast (((cast objType) `prim__shl_Bits64` 32) `prim__or_Bits64` (cast sizeOrTag))
+
 HEADER_SIZE : IRValue I64
 HEADER_SIZE = (Const I64 8)
 
