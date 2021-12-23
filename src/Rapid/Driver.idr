@@ -10,6 +10,7 @@ import Compiler.VMCode
 import Core.Directory
 import Core.CompileExpr
 import Core.Name
+import Data.Utils
 import Libraries.Data.SortedMap
 import Libraries.Utils.Path
 

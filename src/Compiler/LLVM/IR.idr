@@ -1,6 +1,6 @@
 module Compiler.LLVM.IR
 
-import Core.TT
+import Core.Name
 
 import Control.Codegen
 import Data.Utils

@@ -12,6 +12,8 @@ import System.Info
 import Compiler.CompileExpr
 import Compiler.VMCode
 import Compiler.LLVM.IR
+import Compiler.LLVM.Instruction
+import Compiler.LLVM.Rapid.Object
 import Control.Codegen
 import Core.TT
 import Data.Utils
@@ -21,48 +23,8 @@ import Rapid.Common
 -- work around Idris issue #2032: Slow typechecking on Int operation when Data.Fin.fromInteger is in scope
 %hide Data.Fin.fromInteger
 
-OBJECT_TYPE_ID_CON_NO_ARGS : Int
-OBJECT_TYPE_ID_CON_NO_ARGS = 0xff
-
-OBJECT_TYPE_ID_INT : Int
-OBJECT_TYPE_ID_INT = 1
-
--- for now treat all numbers the same
-OBJECT_TYPE_ID_DOUBLE : Int
-OBJECT_TYPE_ID_DOUBLE = 1
-
-OBJECT_TYPE_ID_BITS64 : Int
-OBJECT_TYPE_ID_BITS64 = 1
-
-OBJECT_TYPE_ID_STR : Int
-OBJECT_TYPE_ID_STR = 2
-
-OBJECT_TYPE_ID_CLOSURE : Int
-OBJECT_TYPE_ID_CLOSURE = 3
-
-OBJECT_TYPE_ID_CHAR : Int
-OBJECT_TYPE_ID_CHAR = 4
-
-OBJECT_TYPE_ID_IOREF : Int
-OBJECT_TYPE_ID_IOREF = 5
-
-OBJECT_TYPE_ID_BUFFER : Int
-OBJECT_TYPE_ID_BUFFER = 6
-
-OBJECT_TYPE_ID_OPAQUE : Int
-OBJECT_TYPE_ID_OPAQUE = 0x07
-
-OBJECT_TYPE_ID_POINTER : Int
-OBJECT_TYPE_ID_POINTER = 0x08
-
-OBJECT_TYPE_ID_IOARRAY : Int
-OBJECT_TYPE_ID_IOARRAY = 0x09
-
-OBJECT_TYPE_ID_BIGINT : Int
-OBJECT_TYPE_ID_BIGINT = 0x0a
-
-OBJECT_TYPE_ID_CLOCK : Int
-OBJECT_TYPE_ID_CLOCK = 0x0b
+-- we provide our own in Data.Utils
+%hide Core.Name.Namespace.showSep
 
 CLOSURE_MAX_ARGS : Int
 CLOSURE_MAX_ARGS = 1024
@@ -79,10 +41,6 @@ ToIR Reg where
   showWithoutType (Loc i) = "%v" ++ show i
   showWithoutType RVal = "%rval"
   showWithoutType Discard = "undef"
-
-ToIR String where
-  toIR = id
-  showWithoutType = id
 
 argIR : Reg -> Codegen String
 argIR (Loc i) = pure $ "%ObjPtr %v" ++ show i
@@ -114,9 +72,6 @@ globalHpLimVar = SSA (Pointer 0 RuntimePtr) "%HpLimVar"
 globalRValVar : IRValue (Pointer 0 IRObjPtr)
 globalRValVar = SSA (Pointer 0 IRObjPtr) "%rvalVar"
 
-HEADER_SIZE : IRValue I64
-HEADER_SIZE = (Const I64 8)
-
 isReturn : Reg -> Bool
 isReturn RVal = True
 isReturn _ = False
@@ -125,140 +80,6 @@ reg2val : Reg -> IRValue (Pointer 0 IRObjPtr)
 reg2val (Loc i) = SSA (Pointer 0 IRObjPtr) ("%v" ++ show i ++ "Var")
 reg2val RVal = SSA (Pointer 0 IRObjPtr) ("%rvalVar")
 reg2val Discard = IRDiscard
-
-load : {t : IRType} -> IRValue (Pointer n t) -> Codegen (IRValue t)
-load IRDiscard = pure nullPtr
-load {t} mv = do
-  loaded <- assignSSA $ "load " ++ (show t) ++ ", " ++ (toIR mv)
-  pure $ SSA t loaded
-
-store : {t : IRType} -> IRValue t -> IRValue (Pointer n t) -> Codegen ()
-store _ IRDiscard = pure ()
-store {t} v dst = do
-  appendCode $ "  store " ++ (toIR v) ++ ", " ++ (toIR dst)
-
-icmp : {t : IRType} -> String -> IRValue t -> IRValue t -> Codegen (IRValue I1)
-icmp {t} cond a b = do
-  compare <- assignSSA $ "icmp " ++ cond ++ " " ++ (show t) ++ " " ++ showWithoutType a ++ ", " ++ showWithoutType b
-  pure $ SSA I1 compare
-
-fcmp : String -> IRValue F64 -> IRValue F64 -> Codegen (IRValue I1)
-fcmp cond a b = do
-  compare <- assignSSA $ "fcmp " ++ cond ++ " double " ++ showWithoutType a ++ ", " ++ showWithoutType b
-  pure $ SSA I1 compare
-
-mkZext : {to : IRType} -> IRValue from -> Codegen (IRValue to)
-mkZext {to} val = (SSA to) <$> assignSSA ("zext " ++ toIR val ++ " to " ++ show to)
-
-mkSext : {to : IRType} -> IRValue from -> Codegen (IRValue to)
-mkSext {to} val = (SSA to) <$> assignSSA ("sext " ++ toIR val ++ " to " ++ show to)
-
-fptosi : {to : IRType} -> IRValue from -> Codegen (IRValue to)
-fptosi {to} val = (SSA to) <$> assignSSA ("fptosi " ++ toIR val ++ " to " ++ show to)
-
-fptoui : {to : IRType} -> IRValue from -> Codegen (IRValue to)
-fptoui {to} val = (SSA to) <$> assignSSA ("fptoui " ++ toIR val ++ " to " ++ show to)
-
-sitofp : {to : IRType} -> IRValue from -> Codegen (IRValue to)
-sitofp {to} val = (SSA to) <$> assignSSA ("sitofp " ++ toIR val ++ " to " ++ show to)
-
-uitofp : {to : IRType} -> IRValue from -> Codegen (IRValue to)
-uitofp {to} val = (SSA to) <$> assignSSA ("uitofp " ++ toIR val ++ " to " ++ show to)
-
-phi : {t : IRType} -> List (IRValue t, IRLabel) -> Codegen (IRValue t)
-phi xs = (SSA t) <$> assignSSA ("phi " ++ show t ++ " " ++ showSep ", " (map getEdge xs)) where
-  getEdge : (IRValue t, IRLabel) -> String
-  getEdge (val, lbl) = "[ " ++ showWithoutType val ++ ", " ++ showWithoutType lbl ++ " ]"
-
-getElementPtr : {t : IRType} -> {n : Int} -> IRValue (Pointer n t) -> IRValue ot -> Codegen (IRValue (Pointer n t))
-getElementPtr {t} {n} ptr offset =
-  SSA (Pointer n t) <$> assignSSA ("getelementptr inbounds " ++ show t ++ ", " ++ toIR ptr ++ ", " ++ toIR offset)
-
-bitcastA : {from : IRType} -> {to : IRType} -> {n : Int} -> IRValue from -> Codegen (IRValue (Pointer n to))
-bitcastA {from} {to} {n} val = (SSA (Pointer n to)) <$> assignSSA ("bitcast " ++ toIR val ++ " to " ++ show (Pointer n to))
-
-mkBinOp : {t : IRType} -> String -> IRValue t -> IRValue t -> Codegen (IRValue t)
-mkBinOp {t} s a b = do
-  result <- assignSSA $ s ++ " " ++ (show t) ++ " " ++ showWithoutType a ++ ", " ++ showWithoutType b
-  pure $ SSA t result
-
-mkXOr : {t : IRType} -> IRValue t -> IRValue t -> Codegen (IRValue t)
-mkXOr = mkBinOp "xor"
-
-mkOr : {t : IRType} -> IRValue t -> IRValue t -> Codegen (IRValue t)
-mkOr = mkBinOp "or"
-
-mkAnd : {t : IRType} -> IRValue t -> IRValue t -> Codegen (IRValue t)
-mkAnd = mkBinOp "and"
-
-mkAdd : {t : IRType} -> IRValue t -> IRValue t -> Codegen (IRValue t)
-mkAdd = mkBinOp "add"
-
-mkAddNoWrap : {t : IRType} -> IRValue t -> IRValue t -> Codegen (IRValue t)
-mkAddNoWrap = mkBinOp "add nuw nsw"
-
-mkMul : {t : IRType} -> IRValue t -> IRValue t -> Codegen (IRValue t)
-mkMul = mkBinOp "mul"
-
-mkSub : {t : IRType} -> IRValue t -> IRValue t -> Codegen (IRValue t)
-mkSub = mkBinOp "sub"
-
-mkSDiv : {t : IRType} -> IRValue t -> IRValue t -> Codegen (IRValue t)
-mkSDiv = mkBinOp "sdiv"
-
-mkSRem : {t : IRType} -> IRValue t -> IRValue t -> Codegen (IRValue t)
-mkSRem = mkBinOp "srem"
-
-mkUDiv : {t : IRType} -> IRValue t -> IRValue t -> Codegen (IRValue t)
-mkUDiv = mkBinOp "udiv"
-
-mkURem : {t : IRType} -> IRValue t -> IRValue t -> Codegen (IRValue t)
-mkURem = mkBinOp "urem"
-
-mkShiftL : {t : IRType} -> IRValue t -> IRValue t -> Codegen (IRValue t)
-mkShiftL = mkBinOp "shl"
-
-mkShiftR : {t : IRType} -> IRValue t -> IRValue t -> Codegen (IRValue t)
-mkShiftR = mkBinOp "lshr"
-
-mkAShiftR : {t : IRType} -> IRValue t -> IRValue t -> Codegen (IRValue t)
-mkAShiftR = mkBinOp "ashr"
-
-unlikely : IRValue I1 -> Codegen (IRValue I1)
-unlikely cond = (SSA I1) <$> assignSSA (" call ccc i1 @llvm.expect.i1(" ++ toIR cond ++ ", i1 0)")
-
-likely : IRValue I1 -> Codegen (IRValue I1)
-likely cond = (SSA I1) <$> assignSSA (" call ccc i1 @llvm.expect.i1(" ++ toIR cond ++ ", i1 1)")
-
-branch : IRValue I1 -> (true : IRLabel) -> (false : IRLabel) -> Codegen ()
-branch cond whenTrue whenFalse =
-  appendCode $ "br " ++ toIR cond ++ ", " ++ toIR whenTrue ++ ", " ++ toIR whenFalse
-
-jump : IRLabel -> Codegen ()
-jump to =
-  appendCode $ "br " ++ toIR to
-
-mkSelect : {t : IRType} -> IRValue I1 -> IRValue t -> IRValue t -> Codegen (IRValue t)
-mkSelect {t} s a b = do
-  (SSA t) <$> assignSSA ("select " ++ toIR s ++ ", " ++ toIR a ++ ", " ++ toIR b)
-
-mkMin : {t : IRType} -> IRValue t -> IRValue t -> Codegen (IRValue t)
-mkMin {t} a b = do
-  aSmaller <- icmp "slt" a b
-  (SSA t) <$> assignSSA ("select " ++ toIR aSmaller ++ ", " ++ toIR a ++ ", " ++ toIR b)
-
-mkMax : {t : IRType} -> IRValue t -> IRValue t -> Codegen (IRValue t)
-mkMax {t} a b = do
-  aLarger <- icmp "sgt" a b
-  (SSA t) <$> assignSSA ("select " ++ toIR aLarger ++ ", " ++ toIR a ++ ", " ++ toIR b)
-
-voidCall : String -> String -> Vect n String -> Codegen ()
-voidCall cconv name args =
-  appendCode $ "  call " ++ cconv ++ " void " ++ name ++ "(" ++ (showSep ", " (toList args)) ++ ")"
-
-call : {t : IRType} -> String -> String -> Vect n String -> Codegen (IRValue t)
-call {t} cconv name args =
-  SSA t <$> (assignSSA $ "  call " ++ cconv ++ " " ++ show t ++ " " ++ name ++ "(" ++ (showSep ", " (toList args)) ++ ")")
 
 -- Call a "runtime-aware" foreign function, i.e. one, that can interact with the RTS
 foreignCall : {t : IRType} -> String -> List String -> Codegen (IRValue t)
@@ -280,34 +101,6 @@ foreignVoidCall name args = do
   appendCode $ "  call ccc void " ++ name ++ "(" ++ (showSep ", " ("%TSOPtr %BaseArg"::args)) ++ ")"
   store !(load baseHpPointer) globalHpVar
 
-getObjectSlotAddrVar : {t : IRType} -> IRValue IRObjPtr -> IRValue I64 -> Codegen (IRValue (Pointer 1 t))
-getObjectSlotAddrVar obj pos = do
-  slotPtr <- SSA (Pointer 1 $ Pointer 0 I8) <$> assignSSA ("getelementptr inbounds %Object, " ++ toIR obj ++ ", i32 0, i32 1, " ++ toIR pos)
-  bitcastA slotPtr
-
-getObjectPayloadAddr : {t : IRType} -> IRValue IRObjPtr -> Codegen (IRValue (Pointer 1 t))
-getObjectPayloadAddr obj = getObjectSlotAddrVar obj (Const I64 0)
-
-getObjectSlot : {t : IRType} -> IRValue IRObjPtr -> Int -> Codegen (IRValue t)
-getObjectSlot obj n = load !(getObjectSlotAddrVar obj (Const I64 $ cast n))
-
-putObjectSlot : {t : IRType} -> IRValue IRObjPtr -> IRValue I64 -> IRValue t -> Codegen ()
-putObjectSlot {t} obj pos val = store val !(getObjectSlotAddrVar obj pos)
-
-getObjectHeader : IRValue IRObjPtr -> Codegen (IRValue I64)
-getObjectHeader obj = do
-  headerPtr <- SSA (Pointer 1 I64) <$> assignSSA ("getelementptr inbounds %Object, " ++ (toIR obj) ++ ", i32 0, i32 0")
-  load headerPtr
-
-putObjectHeader : IRValue IRObjPtr -> IRValue I64 -> Codegen ()
-putObjectHeader obj hdr = do
-  headerPtr <- SSA (Pointer 1 I64) <$> assignSSA ("getelementptr inbounds %Object, " ++ (toIR obj) ++ ", i32 0, i32 0")
-  store hdr headerPtr
-
-mkHeader : Int -> IRValue I32 -> Codegen (IRValue I64)
-mkHeader objType sizeOrTag =
-  mkOr (Const I64 $ (cast objType) `prim__shl_Integer` 32) !(mkZext sizeOrTag)
-
 funcEntry : Codegen ()
 funcEntry = do
   appendCode "%HpVar = alloca %RuntimePtr\n"
@@ -327,47 +120,6 @@ funcReturn = do
   ret2 <- assignSSA $ "insertvalue %Return1 " ++ ret1 ++ ", " ++ toIR finHpLim ++ ", 1"
   ret3 <- assignSSA $ "insertvalue %Return1 " ++ ret2 ++ ", " ++ toIR finRVal ++ ", 2"
   appendCode $ "ret %Return1 " ++ ret3
-
-dynamicAllocateInto : GCFlavour -> String -> IRValue I64 -> Codegen ()
-dynamicAllocateInto Statepoint destVarName payloadSize = do
-  totalSize <- mkAddNoWrap payloadSize HEADER_SIZE
-
-  hp <- ((++) "%RuntimePtr ") <$> assignSSA "load %RuntimePtr, %RuntimePtr* %HpVar"
-  hpLim <- ((++) "%RuntimePtr ") <$> assignSSA "load %RuntimePtr, %RuntimePtr* %HpLimVar"
-  let base = "%TSOPtr %BaseArg"
-
-  allocated <- assignSSA $ "call fastcc %Return1 @rapid_allocate_fast(" ++ showSep ", " [hp, base, hpLim] ++ ", "++(toIR totalSize)++") alwaysinline optsize nounwind"
-  newHp <- assignSSA $ "extractvalue %Return1 " ++ allocated ++ ", 0"
-  appendCode $ "store %RuntimePtr " ++ newHp ++ ", %RuntimePtr* %HpVar"
-  newHpLim <- assignSSA $ "extractvalue %Return1 " ++ allocated ++ ", 1"
-  appendCode $ "store %RuntimePtr " ++ newHpLim ++ ", %RuntimePtr* %HpLimVar"
-  appendCode $ destVarName ++ " = extractvalue %Return1 " ++ allocated ++ ", 2"
-dynamicAllocateInto Zero destVarName payloadSize = do
-  payloadSizePlus7 <- mkAddNoWrap payloadSize (Const I64 7)
-  payloadSizeAligned <- mkAnd payloadSizePlus7 (Const I64 (-8))
-  totalSize <- mkAddNoWrap payloadSizeAligned HEADER_SIZE
-  appendCode $ destVarName ++ " = call ccc %ObjPtr @malloc(" ++ toIR totalSize ++ ")"
-dynamicAllocateInto BDW destVarName payloadSize = do
-  payloadSizePlus7 <- mkAddNoWrap payloadSize (Const I64 7)
-  payloadSizeAligned <- mkAnd payloadSizePlus7 (Const I64 (-8))
-  totalSize <- mkAddNoWrap payloadSizeAligned HEADER_SIZE
-  appendCode $ destVarName ++ " = call ccc %ObjPtr @GC_malloc(" ++ toIR totalSize ++ ")"
-
-dynamicAllocate : IRValue I64 -> Codegen (IRValue IRObjPtr)
-dynamicAllocate payloadSize = do
-  varName <- mkVarName "%a"
-  gc <- gcFlavour <$> getOpts
-  dynamicAllocateInto gc varName payloadSize
-  pure $ SSA IRObjPtr varName
-
-mkTrunc : {to : IRType} -> IRValue from -> Codegen (IRValue to)
-mkTrunc {to} val = (SSA to) <$> assignSSA ("trunc " ++ toIR val ++ " to " ++ show to)
-
-mkAbs : IRValue I32 -> Codegen (IRValue I32)
-mkAbs val = call "ccc" "@rapid.abs.i32" [toIR val, "i1 1"]
-
-mkAbs64 : IRValue I64 -> Codegen (IRValue I64)
-mkAbs64 val = call "ccc" "@rapid.abs.i64" [toIR val, "i1 1"]
 
 header : Int -> Integer
 header i = (cast i) `prim__shl_Integer` 32
@@ -677,13 +429,6 @@ mkRuntimeCrash i s = do
   msg <- mkStr i s
   appendCode $ "  call ccc void @idris_rts_crash_msg(" ++ toIR msg ++ ") noreturn"
   appendCode $ "unreachable"
-
-export
-enumerate : List a -> List (Int, a)
-enumerate l = enumerate' 0 l where
-  enumerate' : Int -> List a -> List (Int, a)
-  enumerate' _ [] = []
-  enumerate' i (x::xs) = (i, x)::(enumerate' (i+1) xs)
 
 unboxChar' : IRValue IRObjPtr -> Codegen (IRValue I32)
 unboxChar' src = do
