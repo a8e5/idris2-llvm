@@ -225,11 +225,11 @@ cgMkDouble val = do
   pure newObj
 
 export
-cgMkConstDouble : Int -> Double -> Codegen (IRValue IRObjPtr)
-cgMkConstDouble i d = do
+cgMkConstDouble : Double -> Codegen (IRValue IRObjPtr)
+cgMkConstDouble d = do
   let newHeader = constHeader OBJECT_TYPE_ID_DOUBLE 0
   let typeSignature = "{i64, double}"
-  cName <- addConstant i $ "private unnamed_addr addrspace(1) constant " ++ typeSignature ++ " {" ++ toIR newHeader ++ ", double 0x" ++ (assert_total $ doubleToHex d) ++ "}, align 8"
+  cName <- addConstant $ "private unnamed_addr addrspace(1) constant " ++ typeSignature ++ " {" ++ toIR newHeader ++ ", double 0x" ++ (assert_total $ doubleToHex d) ++ "}, align 8"
   pure $ SSA IRObjPtr $ "bitcast (" ++ typeSignature ++ " addrspace(1)* " ++ cName ++ " to %ObjPtr)"
 
 export
@@ -303,13 +303,13 @@ getStringIR utf8bytes = concatMap okchar utf8bytes
                   else "\\" ++ asHex2 c
 
 export
-mkStr : Int -> String -> Codegen (IRValue IRObjPtr)
-mkStr i s = do
+mkStr : String -> Codegen (IRValue IRObjPtr)
+mkStr s = do
   let utf8bytes = utf8EncodeString s
   let len = length utf8bytes
   let newHeader = constHeader OBJECT_TYPE_ID_STR (cast len)
   let typeSignature = "{i64, [" ++ show len ++ " x i8]}"
-  cName <- addConstant i $ "private unnamed_addr addrspace(1) constant " ++ typeSignature ++ " {" ++ toIR newHeader ++ ", [" ++ show len ++ " x i8] c\"" ++ (getStringIR utf8bytes) ++ "\"}, align 8"
+  cName <- addConstant $ "private unnamed_addr addrspace(1) constant " ++ typeSignature ++ " {" ++ toIR newHeader ++ ", [" ++ show len ++ " x i8] c\"" ++ (getStringIR utf8bytes) ++ "\"}, align 8"
   pure $ SSA IRObjPtr $ "bitcast (" ++ typeSignature ++ " addrspace(1)* " ++ cName ++ " to %ObjPtr)"
 
 export

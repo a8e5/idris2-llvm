@@ -42,11 +42,11 @@ getUnique = do
   pure i
 
 export
-addConstant : Int -> String -> Codegen String
-addConstant i v = do
+addConstant : String -> Codegen String
+addConstant v = do
   ci <- getUnique
-  let name = "@glob_" ++ show i ++ "_c" ++ show ci
   (MkCGBuf o i c l e) <- get
+  let name = "@glob_" ++ show (o.constNamespace) ++ "_c" ++ show ci
   put (MkCGBuf o i ((name, v)::c) l e)
   pure name
 

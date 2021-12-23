@@ -110,7 +110,7 @@ cgMkConstInteger i val =
       let lenForHeader = if (val >= 0) then len32 else (twosComplement len32)
       let newHeader = constHeader OBJECT_TYPE_ID_BIGINT lenForHeader
       let typeSignature = "{i64, [" ++ show len ++ " x %LimbT]}"
-      cName <- addConstant i $ "private unnamed_addr addrspace(1) constant " ++ typeSignature ++ " {" ++ toIR newHeader ++ ", [" ++ show len ++ " x %LimbT] [" ++ (getLimbsIR limbs) ++ "]}, align 8"
+      cName <- addConstant $ "private unnamed_addr addrspace(1) constant " ++ typeSignature ++ " {" ++ toIR newHeader ++ ", [" ++ show len ++ " x %LimbT] [" ++ (getLimbsIR limbs) ++ "]}, align 8"
       pure $ SSA IRObjPtr $ "bitcast (" ++ typeSignature ++ " addrspace(1)* " ++ cName ++ " to %ObjPtr)"
   where
       getLimbs : Integer -> (n:Nat ** Vect n Integer)
@@ -229,7 +229,7 @@ mkSubstring strObj startIndexRaw length = do
 
 mkRuntimeCrash : Int -> String -> Codegen ()
 mkRuntimeCrash i s = do
-  msg <- mkStr i s
+  msg <- mkStr s
   appendCode $ "  call ccc void @idris_rts_crash_msg(" ++ toIR msg ++ ") noreturn"
   appendCode $ "unreachable"
 
@@ -453,7 +453,7 @@ getInstForConstCaseString i r alts def =
     makeCaseAlt caseId labelEnd scrutinee (idx, Str s, is) = do
       let labelAltStart = MkLabel (caseId ++ "_alt_" ++ show idx)
       let labelAltNext = MkLabel (caseId ++ "_next" ++ show idx)
-      compStr <- mkStr i s
+      compStr <- mkStr s
       match <- compareStr compStr scrutinee
       appendCode $ "br " ++ toIR match ++ ", " ++ toIR labelAltStart ++ ", " ++ toIR labelAltNext
       -- compare s == scrut
@@ -617,88 +617,144 @@ genericIntBox ty ival with (intKind ty)
     addError ("invalid int box: " ++ show ty)
     cgMkInt (Const I64 0)
 
-genericCast : Constant -> Constant -> Reg -> Reg -> Codegen ()
-genericCast fromType toType dest src =
-  genericCast' fromType toType dest src (intKind fromType) (intKind toType)
+castError : Constant -> Constant -> Codegen (IRValue IRObjPtr)
+castError fromType toType = do
+  addError ("cast not implemented: " ++ (show fromType) ++ " -> " ++ (show toType))
+  pure nullPtr
 
-  where
-  genericCast' : Constant -> Constant -> Reg -> Reg -> Maybe IntKind -> Maybe IntKind -> Codegen ()
-  -- to Char
-  genericCast' fromType CharType dest src (Just _) _ = do
-    raw <- genericIntUnbox fromType !(load (reg2val src))
-    ival <- mkTrunc {to=I32} raw
-    -- this also helps to rule out negative values, should fromType be signed
-    surrogateUpperBound <- icmp "ult" ival (Const I32 0xe000)
-    surrogateLowerBound <- icmp "ugt" ival (Const I32 0xd7ff)
-    isSurrogate <- mkAnd surrogateLowerBound surrogateUpperBound
-    tooHigh <- icmp "ugt" ival (Const I32 0x10ffff)
-    isInvalid <- mkOr tooHigh isSurrogate
-    codepoint <- mkSelect isInvalid (Const I32 0) ival
-    newObj <- cgMkChar codepoint
-    store newObj (reg2val dest)
+castIntegerToDouble : IRValue IRObjPtr -> Codegen (IRValue IRObjPtr)
+castIntegerToDouble intObj = do
+  size <- getObjectSize intObj
+  isZero <- icmp "eq" (Const I32 0) size
 
-  -- to Double
-  genericCast' fromType DoubleType dest src (Just (Unsigned _)) _ = do
-    ival <- genericIntUnbox fromType !(load (reg2val src))
-    newObj <- cgMkDouble !(uitofp ival)
-    store newObj (reg2val dest)
-  genericCast' fromType DoubleType dest src (Just (Signed (P _))) _ = do
-    ival <- genericIntUnbox fromType !(load (reg2val src))
-    newObj <- cgMkDouble !(sitofp ival)
-    store newObj (reg2val dest)
+  mkIf (pure isZero) (cgMkConstDouble 0.0) (do
+    sizeAbs <- mkAbs size
+    highestLimbIndex <- mkZext {to=I64} !(mkSub sizeAbs (Const I32 1))
+    msbLimbAddr <- getObjectSlotAddrVar {t=I64} intObj highestLimbIndex
+    msbLimb <- load msbLimbAddr
+    countLeadingZeros <- SSA I64 <$> assignSSA ("  call ccc i64 @llvm.ctlz.i64(" ++ toIR msbLimb ++ ", i1 1)")
+    exponentOffset <- mkAdd (Const I64 (1023 + 63)) !(mkMul highestLimbIndex (Const I64 64))
+    exponent <- mkSub exponentOffset countLeadingZeros
 
-  -- from Double
-  genericCast' DoubleType toType dest src _ (Just (Unsigned _)) = do
-    f1 <- unboxDouble !(load (reg2val src))
-    newObj <- genericIntBox toType !(fptoui f1)
-    store newObj (reg2val dest)
-  genericCast' DoubleType toType dest src _ (Just (Signed (P _))) = do
-    f1 <- unboxDouble !(load (reg2val src))
-    newObj <- genericIntBox toType !(fptosi f1)
-    store newObj (reg2val dest)
+    isInfinity <- icmp "ugt" exponent (Const I64 2046)
+    doubleAsBits <- mkIf (pure isInfinity) (do
+        pure (Const I64 $ cast IEEE_DOUBLE_INF_POS)
+      ) (do
+        fracShiftLeft <- icmp "uge" countLeadingZeros (Const I64 12)
+        shiftedFraction <- mkIf (pure fracShiftLeft) (do
+            mkShiftL msbLimb !(mkSub countLeadingZeros (Const I64 11))
+          ) (do
+            mkShiftR msbLimb !(mkSub (Const I64 11) countLeadingZeros)
+          )
+        fraction <- mkIf (icmp "eq" sizeAbs (Const I32 1)) (do
+            pure shiftedFraction
+          ) (do
+            mkIf (pure fracShiftLeft) (do
+                secondMsbLimbAddr <- getObjectSlotAddrVar {t=I64} intObj !(mkSub highestLimbIndex (Const I64 1))
+                secondMsbLimb <- load secondMsbLimbAddr
+                fractionLowerPart <- mkShiftR secondMsbLimb !(mkSub (Const I64 (64 + 11)) countLeadingZeros)
+                mkOr shiftedFraction fractionLowerPart
+              ) (do
+                pure shiftedFraction
+              )
+          )
+        shiftedExponent <- mkShiftL exponent (Const I64 52)
+        maskedFraction <- mkAnd (Const I64 $ cast IEEE_DOUBLE_MASK_FRAC) fraction
+        mkOr shiftedExponent maskedFraction
+      )
+    isNegative <- icmp "slt" size (Const I32 0)
+    sign <- mkSelect isNegative (Const I64 $ cast IEEE_DOUBLE_MASK_SIGN) (Const I64 0)
+    signedDoubleAsBits <- mkOr sign doubleAsBits
+    cgMkDoubleFromBits signedDoubleAsBits
+    )
 
-  -- to String
-  genericCast' fromType StringType dest src (Just _) _ = do
-    ival <- genericIntUnbox fromType !(load (reg2val src))
-    -- max size of 2^64 = 20 + (optional "-" prefix) + NUL byte (from snprintf)
-    newStr <- dynamicAllocate (ConstI64 24)
-    strPayload <- getObjectPayloadAddr {t=I8} newStr
-    length <- (SSA I64) <$> assignSSA ("call ccc i64 @idris_rts_int_to_str(" ++ toIR strPayload ++ ", " ++ toIR ival ++ ")")
-    newHeader <- mkHeader OBJECT_TYPE_ID_STR !(mkTrunc length)
-    putObjectHeader newStr newHeader
-    store newStr (reg2val dest)
+genericCastFromDouble : (toType : Constant) -> IRValue IRObjPtr -> Codegen (IRValue IRObjPtr)
+genericCastFromDouble toType src = do
+  f1 <- unboxDouble src
+  case (intKind toType) of
+       Just (Unsigned _) => genericIntBox toType !(fptoui f1)
+       Just (Signed (P _)) => genericIntBox toType !(fptosi f1)
+       _ => castError DoubleType toType
 
-  -- from String
-  genericCast' StringType toType dest src _ (Just _) = do
-    strObj <- load (reg2val src)
-    parsedVal <- SSA I64 <$> assignSSA ("  call ccc i64 @idris_rts_str_to_int(" ++ toIR strObj ++ ")")
-    newObj <- genericIntBox toType parsedVal
-    store newObj (reg2val dest)
+genericCast : Constant -> Constant -> IRValue IRObjPtr -> Codegen (IRValue IRObjPtr)
+-- to Char
+genericCast fromType CharType src =
+  case (intKind fromType) of
+       Just _ => do
+         raw <- genericIntUnbox fromType src
+         ival <- mkTrunc {to=I32} raw
+         -- this also helps to rule out negative values, should fromType be signed
+         surrogateUpperBound <- icmp "ult" ival (Const I32 0xe000)
+         surrogateLowerBound <- icmp "ugt" ival (Const I32 0xd7ff)
+         isSurrogate <- mkAnd surrogateLowerBound surrogateUpperBound
+         tooHigh <- icmp "ugt" ival (Const I32 0x10ffff)
+         isInvalid <- mkOr tooHigh isSurrogate
+         codepoint <- mkSelect isInvalid (Const I32 0) ival
+         cgMkChar codepoint
+       Nothing => castError fromType CharType
 
-  -- from generic int to generic int
-  genericCast' fromType IntType dest src (Just _) _ = do
-    ival <- genericIntUnbox fromType !(load (reg2val src))
-    newObj <- cgMkInt ival
-    store newObj (reg2val dest)
-  genericCast' fromType toType dest src (Just _) (Just (Unsigned bits)) = do
-    ival <- genericIntUnbox fromType !(load (reg2val src))
-    newObj <- if bits == 64
-                 then cgMkBits64 ival
-                 else do let mask = intMask bits
-                         truncatedVal <- mkAnd (Const I64 mask) ival
-                         cgMkInt truncatedVal
-    store newObj (reg2val dest)
-  genericCast' fromType toType dest src (Just _) (Just (Signed (P bits))) = do
-    ival <- genericIntUnbox fromType !(load (reg2val src))
-    newObj <- if bits == 64
-                 then cgMkBits64 ival
-                 else do let mask = intMask bits
-                         truncatedVal <- mkAnd (Const I64 mask) ival
-                         cgMkInt truncatedVal
-    store newObj (reg2val dest)
+-- to Double
+genericCast fromType DoubleType src = do
+  ival <- genericIntUnbox fromType src
+  case (intKind fromType) of
+       Just (Unsigned _) => cgMkDouble !(uitofp ival)
+       Just (Signed Unlimited) => castIntegerToDouble src
+       Just (Signed (P _)) => cgMkDouble !(sitofp ival)
+       Nothing => castError fromType DoubleType
 
-  genericCast' fromType toType dest src _ _ = do
-    addError ("cast not implemented: " ++ (show fromType) ++ " -> " ++ (show toType))
+-- from Double
+genericCast DoubleType toType src = genericCastFromDouble toType src
+
+-- to String
+genericCast fromType StringType src =
+  case (intKind fromType) of
+       Just _ => do
+         ival <- genericIntUnbox fromType src
+         -- max size of 2^64 = 20 + (optional "-" prefix) + NUL byte (from snprintf)
+         newStr <- dynamicAllocate (ConstI64 24)
+         strPayload <- getObjectPayloadAddr {t=I8} newStr
+         length <- (SSA I64) <$> assignSSA ("call ccc i64 @idris_rts_int_to_str(" ++ toIR strPayload ++ ", " ++ toIR ival ++ ")")
+         newHeader <- mkHeader OBJECT_TYPE_ID_STR !(mkTrunc length)
+         putObjectHeader newStr newHeader
+         pure newStr
+       Nothing => castError fromType StringType
+
+-- from String
+genericCast StringType toType src =
+  case (intKind toType) of
+       Just _ => do
+         parsedVal <- SSA I64 <$> assignSSA ("  call ccc i64 @idris_rts_str_to_int(" ++ toIR src ++ ")")
+         genericIntBox toType parsedVal
+       Nothing => castError StringType toType
+
+-- from generic int to Int
+genericCast fromType IntType src =
+  case (intKind fromType) of
+       Just _ => do
+         ival <- genericIntUnbox fromType src
+         cgMkInt ival
+       Nothing => castError fromType IntType
+
+-- from generic int to generic int
+genericCast fromType toType src = do
+  case (intKind fromType) of
+       Just _ => do
+         ival <- genericIntUnbox fromType src
+         case (intKind toType) of
+              Just (Unsigned 64) => cgMkBits64 ival
+              Just (Unsigned bits) => do
+                let mask = intMask bits
+                truncatedVal <- mkAnd (Const I64 mask) ival
+                cgMkInt truncatedVal
+              Just (Signed (P 64)) => cgMkBits64 ival
+              Just (Signed (P bits)) => do
+                let mask = intMask bits
+                truncatedVal <- mkAnd (Const I64 mask) ival
+                cgMkInt truncatedVal
+              Just (Signed Unlimited) => do
+                cgMkIntegerSigned ival
+              Nothing => castError fromType toType
+       Nothing => castError fromType toType
 
 getInstForConstCaseIntLike : {auto conNames : SortedMap Name Int} -> Constant -> Int -> Reg -> List (Constant, List VMInst) -> Maybe (List VMInst) -> Codegen ()
 getInstForConstCaseIntLike ty i r alts def =
@@ -1244,7 +1300,7 @@ getInstIR i (OP r (Cast IntegerType StringType) [r1]) = do
   isZero <- icmp "eq" s1 (Const I32 0)
 
   mkIf_ (pure isZero) (do
-      newStr <- mkStr i "0"
+      newStr <- mkStr "0"
       store newStr (reg2val r)
     ) (do
       maxDigits <- call {t=TARGET_SIZE_T} "ccc" "@__gmpn_sizeinbase" [toIR !(getObjectPayloadAddr {t=MP_LIMB_T} i1), toIR u1, "i32 10"]
@@ -1342,56 +1398,6 @@ getInstIR i (OP r (Cast DoubleType IntegerType) [r1]) = do
     )
   store newObj (reg2val r)
 
-getInstIR i (OP r (Cast IntegerType DoubleType) [r1]) = do
-  intObj <- load (reg2val r1)
-  size <- getObjectSize intObj
-  isZero <- icmp "eq" (Const I32 0) size
-
-  mkIf_ (pure isZero) (do
-      newObj <- cgMkConstDouble i 0.0
-      store newObj (reg2val r)
-    ) (do
-    sizeAbs <- mkAbs size
-    highestLimbIndex <- mkZext {to=I64} !(mkSub sizeAbs (Const I32 1))
-    msbLimbAddr <- getObjectSlotAddrVar {t=I64} intObj highestLimbIndex
-    msbLimb <- load msbLimbAddr
-    countLeadingZeros <- SSA I64 <$> assignSSA ("  call ccc i64 @llvm.ctlz.i64(" ++ toIR msbLimb ++ ", i1 1)")
-    exponentOffset <- mkAdd (Const I64 (1023 + 63)) !(mkMul highestLimbIndex (Const I64 64))
-    exponent <- mkSub exponentOffset countLeadingZeros
-
-    isInfinity <- icmp "ugt" exponent (Const I64 2046)
-    doubleAsBits <- mkIf (pure isInfinity) (do
-        pure (Const I64 $ cast IEEE_DOUBLE_INF_POS)
-      ) (do
-        fracShiftLeft <- icmp "uge" countLeadingZeros (Const I64 12)
-        shiftedFraction <- mkIf (pure fracShiftLeft) (do
-            mkShiftL msbLimb !(mkSub countLeadingZeros (Const I64 11))
-          ) (do
-            mkShiftR msbLimb !(mkSub (Const I64 11) countLeadingZeros)
-          )
-        fraction <- mkIf (icmp "eq" sizeAbs (Const I32 1)) (do
-            pure shiftedFraction
-          ) (do
-            mkIf (pure fracShiftLeft) (do
-                secondMsbLimbAddr <- getObjectSlotAddrVar {t=I64} intObj !(mkSub highestLimbIndex (Const I64 1))
-                secondMsbLimb <- load secondMsbLimbAddr
-                fractionLowerPart <- mkShiftR secondMsbLimb !(mkSub (Const I64 (64 + 11)) countLeadingZeros)
-                mkOr shiftedFraction fractionLowerPart
-              ) (do
-                pure shiftedFraction
-              )
-          )
-        shiftedExponent <- mkShiftL exponent (Const I64 52)
-        maskedFraction <- mkAnd (Const I64 $ cast IEEE_DOUBLE_MASK_FRAC) fraction
-        mkOr shiftedExponent maskedFraction
-      )
-    isNegative <- icmp "slt" size (Const I32 0)
-    sign <- mkSelect isNegative (Const I64 $ cast IEEE_DOUBLE_MASK_SIGN) (Const I64 0)
-    signedDoubleAsBits <- mkOr sign doubleAsBits
-    newObj <- cgMkDoubleFromBits signedDoubleAsBits
-    store newObj (reg2val r)
-    )
-
 getInstIR i (OP r (Cast StringType IntegerType) [r1]) = do
   strObj <- load (reg2val r1)
   strLength <- getObjectSize strObj
@@ -1414,18 +1420,6 @@ getInstIR i (OP r (Cast StringType DoubleType) [r1]) = do
   newDouble <- cgMkDouble parsedVal
   store newDouble (reg2val r)
 
-getInstIR i (OP r (Cast Bits8Type IntegerType) [r1]) = do
-  ival <- unboxInt (reg2val r1)
-  newInt <- cgMkIntegerSigned ival
-  store newInt (reg2val r)
-getInstIR i (OP r (Cast Bits16Type IntegerType) [r1]) = do
-  ival <- unboxInt (reg2val r1)
-  newInt <- cgMkIntegerSigned ival
-  store newInt (reg2val r)
-getInstIR i (OP r (Cast Bits32Type IntegerType) [r1]) = do
-  ival <- unboxInt (reg2val r1)
-  newInt <- cgMkIntegerSigned ival
-  store newInt (reg2val r)
 getInstIR i (OP r (Cast Bits64Type IntegerType) [r1]) = do
   ival <- unboxBits64 !(load (reg2val r1))
   isZero <- icmp "eq" (Const I64 0) ival
@@ -1441,23 +1435,6 @@ getInstIR i (OP r (Cast Bits64Type IntegerType) [r1]) = do
     )
   store newObj (reg2val r)
 
-getInstIR i (OP r (Cast Int8Type IntegerType) [r1]) = do
-  ival <- unboxIntSigned 8 (reg2val r1)
-  newInt <- cgMkIntegerSigned ival
-  store newInt (reg2val r)
-getInstIR i (OP r (Cast Int16Type IntegerType) [r1]) = do
-  ival <- unboxIntSigned 16 (reg2val r1)
-  newInt <- cgMkIntegerSigned ival
-  store newInt (reg2val r)
-getInstIR i (OP r (Cast Int32Type IntegerType) [r1]) = do
-  ival <- unboxIntSigned 32 (reg2val r1)
-  newInt <- cgMkIntegerSigned ival
-  store newInt (reg2val r)
-getInstIR i (OP r (Cast Int64Type IntegerType) [r1]) = do
-  ival <- unboxBits64 !(load (reg2val r1))
-  newInt <- cgMkIntegerSigned ival
-  store newInt (reg2val r)
-
 getInstIR i (OP r (Cast CharType StringType) [r1]) = do
   o1 <- load (reg2val r1)
   charVal <- unboxChar' o1
@@ -1472,11 +1449,6 @@ getInstIR i (OP r (Cast CharType toType) [r1]) = do
   charVal <- unboxChar' !(load (reg2val r1))
   newInt <- genericIntBox toType !(mkZext charVal)
   store newInt (reg2val r)
-
-getInstIR i (OP r (Cast IntType IntegerType) [r1]) = do
-  ival <- unboxInt (reg2val r1)
-  integerObj <- cgMkIntegerSigned ival
-  store integerObj (reg2val r)
 
 getInstIR i (OP r (Add Bits64Type) [r1, r2]) = bits64Binary mkAdd r r1 r2
 getInstIR i (OP r (Sub Bits64Type) [r1, r2]) = bits64Binary mkSub r r1 r2
@@ -1798,7 +1770,9 @@ getInstIR i (OP r (LTE IntegerType) [r1, r2]) = do
 
   store obj (reg2val r)
 
-getInstIR i (OP r (Cast fromType toType) [r1]) = genericCast fromType toType r r1
+getInstIR i (OP r (Cast fromType toType) [r1]) = do
+  castedObj <- genericCast fromType toType !(load (reg2val r1))
+  store castedObj (reg2val r)
 
 getInstIR i (OP r (LT  DoubleType) [r1, r2]) = doubleCmp "olt" r r1 r2
 getInstIR i (OP r (LTE DoubleType) [r1, r2]) = doubleCmp "ole" r r1 r2
@@ -1940,12 +1914,12 @@ getInstIR i (MKCONSTANT r (BI c)) = do
   obj <- cgMkConstInteger i c
   store obj (reg2val r)
 getInstIR i (MKCONSTANT r (Db d)) = do
-  obj <- cgMkConstDouble i d
+  obj <- cgMkConstDouble d
   store obj (reg2val r)
 getInstIR i (MKCONSTANT r WorldVal) = do
   obj <- mkCon 1337 []
   store obj (reg2val r)
-getInstIR i (MKCONSTANT r (Str s)) = store !(mkStr i s) (reg2val r)
+getInstIR i (MKCONSTANT r (Str s)) = store !(mkStr s) (reg2val r)
 
 getInstIR i (CONSTCASE r alts def) = case findConstCaseType alts of
                                           Right (IntLikeCase ty) => getInstForConstCaseIntLike ty i r alts def
@@ -2083,10 +2057,10 @@ compileExtPrim i (NS ns n) r args with (unsafeUnfoldNamespace ns)
     store val addr
 
   compileExtPrim i (NS ns (UN $ Basic "prim__codegen")) r [] | ["Info", "System"] = do
-    store !(mkStr i "rapid") (reg2val r)
+    store !(mkStr "rapid") (reg2val r)
   compileExtPrim i (NS ns (UN $ Basic "prim__os")) r [] | ["Info", "System"] = do
     -- no cross compiling for now:
-    store !(mkStr i System.Info.os) (reg2val r)
+    store !(mkStr System.Info.os) (reg2val r)
   compileExtPrim i (NS ns (UN $ Basic "void")) r _ | ["Uninhabited", "Prelude"] = do
     appendCode $ "  call ccc void @rapid_crash(i8* bitcast ([23 x i8]* @error_msg_void to i8*)) noreturn"
     appendCode $ "unreachable"
@@ -2316,12 +2290,12 @@ getVMIR opts conNames (i, n, MkVMFun args body) =
                     then ""
                     else case args of
                               [] => ""
-                              neArgs@(_::_) => runCodegen opts $ getFunIRClosureEntry conNames ((2*i + 1)+1000) n neArgs body
+                              neArgs@(_::_) => runCodegen ({constNamespace := 2*i+1001} opts) $ getFunIRClosureEntry conNames ((2*i + 1)+1000) n neArgs body
                               in
-      (runCodegen opts $ getFunIR conNames ((2*i)+1000) n (map Loc args) body) ++ closureEntry where
+      (runCodegen ({constNamespace := (2*i+1000)} opts) $ getFunIR conNames ((2*i)+1000) n (map Loc args) body) ++ closureEntry
 getVMIR opts conNames (i, (n, MkVMForeign cs args ret)) =
   let debug = debugEnabled opts in
-      (runCodegen opts $ getForeignFunctionIR i n cs args ret) ++ "\n"
+      (runCodegen ({constNamespace := i} opts) $ getForeignFunctionIR i n cs args ret) ++ "\n"
 getVMIR _ _ (i, (n, MkVMError is)) = ""
 
 funcPtrTypes : String

@@ -236,7 +236,7 @@ mk_prim__noop2 [_, _] = do
 
 mk_prim__currentDir : Vect 1 (IRValue IRObjPtr) -> Codegen ()
 mk_prim__currentDir [_] = do
-  dummy <- mkStr 1 "/tmp"
+  dummy <- mkStr "/tmp"
   newPtr <- dynamicAllocate (Const I64 8)
   putObjectHeader newPtr (constHeader OBJECT_TYPE_ID_POINTER 0)
   putObjectSlot newPtr (Const I64 0) dummy

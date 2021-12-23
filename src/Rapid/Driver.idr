@@ -30,7 +30,7 @@ gcStubsBDW =
   """
 
 gcStubs : CompileOpts -> String
-gcStubs (MkCompileOpts _ _ Statepoint targetOs) =
+gcStubs (MkCompileOpts _ _ Statepoint targetOs _) =
   """
   define external ccc void @GC_init() { call ccc void @idris_rts_crash(i64 76) noreturn \n unreachable }
   define external ccc void @GC_disable() { call ccc void @idris_rts_crash(i64 76) noreturn \n unreachable }
@@ -45,8 +45,8 @@ gcStubs (MkCompileOpts _ _ Statepoint targetOs) =
                -- on Apple platforms, an underscore is added implicitly:
                then "@_LLVM_StackMaps"
                else "@__LLVM_StackMaps"
-gcStubs (MkCompileOpts _ _ BDW _) = gcStubsBDW
-gcStubs (MkCompileOpts _ _ Zero _) = gcStubsBDW
+gcStubs (MkCompileOpts _ _ BDW _ _) = gcStubsBDW
+gcStubs (MkCompileOpts _ _ Zero _ _) = gcStubsBDW
 
 gcPreamble : CompileOpts -> String
 gcPreamble opts =

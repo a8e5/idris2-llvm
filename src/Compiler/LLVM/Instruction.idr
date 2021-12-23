@@ -181,6 +181,7 @@ mkIf_ cond true false = do
   jump lblEnd
   beginLabel lblEnd
 
+export
 mkIf : {t : IRType} ->
        (cond : Codegen (IRValue I1)) ->
        (true : Codegen (IRValue t)) ->
