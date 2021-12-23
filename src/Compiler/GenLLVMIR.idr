@@ -1301,21 +1301,14 @@ getInstIRWithComment instr = do
   --appendCode (instrAsComment instr)
   getInstIR instr
 
-appendMetadata : Int -> String -> Codegen String
-appendMetadata o value = do
-  i <- getUnique
-  let varname = "!" ++ show (i * 1000000 + o)
-  appendCode ("  " ++ varname ++ " = " ++ value)
-  pure varname
-
-getFunIR : SortedMap Name Int -> Int -> Name -> List Reg -> List VMInst -> Codegen ()
-getFunIR conNames i n args body = do
+getFunIR : SortedMap Name Int -> Name -> List Reg -> List VMInst -> Codegen ()
+getFunIR conNames n args body = do
     fargs <- traverse argIR args
     debug <- debugEnabled <$> getOpts
     let visibility = if debug then "external" else "private"
     debugInfo <- if (not debug) then pure "" else do
-      funTmd <- appendMetadata i "!DISubroutineType(types: !{null, !0, !0, !0, !1})"
-      funmd <- appendMetadata i $ "distinct !DISubprogram(name: \"" ++ safeName n ++ "\", type: " ++ funTmd ++ ", unit: !99)"
+      funTmd <- appendMetadata "!DISubroutineType(types: !{null, !0, !0, !0, !1})"
+      funmd <- appendMetadata $ "distinct !DISubprogram(name: \"" ++ safeName n ++ "\", type: " ++ funTmd ++ ", unit: !99)"
       pure $ "!dbg " ++ funmd
     appendCode ("\n\ndefine " ++ visibility ++ " fastcc %Return1 @" ++ safeName n ++ "(" ++ (showSep ", " $ prepareArgCallConv fargs) ++ ") gc \"statepoint-example\" " ++ debugInfo ++ " {")
     appendCode "entry:"
@@ -1329,8 +1322,8 @@ getFunIR conNames i n args body = do
     copyArg (Loc i) = let r = show i in "  %v" ++ r ++ "Var = alloca %ObjPtr\n  store %ObjPtr %v" ++ r ++ ", %ObjPtr* %v" ++ r ++ "Var"
     copyArg _ = "ERROR: not an argument"
 
-getFunIRClosureEntry : SortedMap Name Int -> Int -> Name -> (args : List Int) -> {auto ok : NonEmpty args} -> List VMInst -> Codegen ()
-getFunIRClosureEntry conNames i n args body = do
+getFunIRClosureEntry : SortedMap Name Int -> Name -> (args : List Int) -> {auto ok : NonEmpty args} -> List VMInst -> Codegen ()
+getFunIRClosureEntry conNames n args body = do
     debug <- debugEnabled <$> getOpts
     let visibility = if debug then "external" else "private"
     appendCode ("\n\ndefine " ++ visibility ++ " fastcc %Return1 @" ++ safeName n ++ "$$closureEntry(" ++ (showSep ", " $ prepareArgCallConv ["%ObjPtr %clObj", "%ObjPtr %lastArg"]) ++ ") gc \"statepoint-example\" {")
@@ -1350,8 +1343,8 @@ getFunIRClosureEntry conNames i n args body = do
         arg <- getObjectSlot clObj (index + 1)
         store arg (reg2val (Loc i))
 
-getForeignFunctionIR : Int -> Name -> List String -> List CFType -> CFType -> Codegen ()
-getForeignFunctionIR i name cs args ret = do
+getForeignFunctionIR : Name -> List String -> List CFType -> CFType -> Codegen ()
+getForeignFunctionIR name cs args ret = do
   let found = findForeignName cs
   let builtin = found >>= ((flip lookup) builtinPrimitives)
   case (builtin, found) of
@@ -1367,12 +1360,12 @@ getVMIR opts conNames (i, n, MkVMFun args body) =
                     then ""
                     else case args of
                               [] => ""
-                              neArgs@(_::_) => runCodegen ({constNamespace := 2*i+1001} opts) $ getFunIRClosureEntry conNames ((2*i + 1)+1000) n neArgs body
+                              neArgs@(_::_) => runCodegen ({constNamespace := 2*i+1001} opts) $ getFunIRClosureEntry conNames n neArgs body
                               in
-      (runCodegen ({constNamespace := (2*i+1000)} opts) $ getFunIR conNames ((2*i)+1000) n (map Loc args) body) ++ closureEntry
+      (runCodegen ({constNamespace := (2*i+1000)} opts) $ getFunIR conNames n (map Loc args) body) ++ closureEntry
 getVMIR opts conNames (i, (n, MkVMForeign cs args ret)) =
   let debug = debugEnabled opts in
-      (runCodegen ({constNamespace := i} opts) $ getForeignFunctionIR i n cs args ret) ++ "\n"
+      (runCodegen ({constNamespace := i} opts) $ getForeignFunctionIR n cs args ret) ++ "\n"
 getVMIR _ _ (i, (n, MkVMError is)) = ""
 
 funcPtrTypes : String
