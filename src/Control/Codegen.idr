@@ -68,6 +68,12 @@ addMetadata i v = do
   pure name
 
 export
+mkVarName : String -> Codegen String
+mkVarName pfx = do
+  i <- getUnique
+  pure $ (pfx ++ show i)
+
+export
 runCodegen : CompileOpts -> Codegen () -> String
 runCodegen o r = let (MkCGBuf _ _ cs ls errors) = fst $ runState (emptyCG o) r in
                      fastConcat $ intersperse "\n" $ (map (\(n,v) => n ++ " = " ++ v) $ reverse cs) ++ reverse ls

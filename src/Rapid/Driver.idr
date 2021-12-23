@@ -15,6 +15,7 @@ import Libraries.Utils.Path
 
 import Rapid.Common
 import Compiler.GenLLVMIR
+import Compiler.LLVM.IR
 import Compiler.PrepareCode
 
 gcStubsBDW : String

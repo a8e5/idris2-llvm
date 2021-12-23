@@ -30,6 +30,11 @@ else()
 endif()
 list(APPEND RTS_CFLAGS "-Wall" "-Wpedantic" "-Werror" "-Wno-error=format")
 
+set(RAPID_GC_STATS_ENABLED OFF CACHE BOOL "Print GC stats at program exit")
+if (RAPID_GC_STATS_ENABLED)
+  list(APPEND RTS_CFLAGS "-DRAPID_GC_STATS_ENABLED")
+endif()
+
 foreach(FILE ${RTS_INCLUDES})
   list(APPEND RTS_INCLUDE_FLAGS "-I" "${FILE}")
 endforeach()
@@ -59,6 +64,7 @@ add_custom_command(
   COMMAND clang ARGS "-c" "-o" "${RAPID_PLATFORM_LIB}.o" ${RAPID_PLATFORM_SOURCE}
   COMMAND llvm-ar ARGS rcsu "${RAPID_PLATFORM_LIB}" "${RAPID_PLATFORM_LIB}.o"
   DEPENDS ${RAPID_PLATFORM_SOURCE}
+  BYPRODUCTS "${RAPID_PLATFORM_LIB}.o"
   )
 
 add_custom_target(rapid_rts ALL

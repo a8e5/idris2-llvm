@@ -7,9 +7,6 @@
 #undef RAPID_GC_DEBUG_ENABLED
 /*#define RAPID_GC_DEBUG_ENABLED*/
 
-#undef RAPID_GC_STATS_ENABLED
-/*#define RAPID_GC_STATS_ENABLED*/
-
 /*const size_t INITIAL_NURSERY_SIZE = 128;*/
 static const size_t INITIAL_NURSERY_SIZE = 2 * 1024 * 1024;
 
