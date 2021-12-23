@@ -231,7 +231,7 @@ makeCaseLabel {conNames} caseId (Right n,_) =
                      pure "error"
 
 instrAsComment : VMInst -> String
-instrAsComment i = ";" ++ (unwords $ lines $ show i)
+instrAsComment instruction = ";" ++ (unwords $ lines $ show instruction)
 
 prepareArg : Reg -> Codegen (IRValue IRObjPtr)
 prepareArg Discard = do
@@ -292,8 +292,8 @@ assertObjectType : Reg -> Int -> Codegen ()
 assertObjectType r t = assertObjectType' !(load (reg2val r)) t
 
 mutual
-getInstForConstCaseChar : {auto conNames : SortedMap Name Int} -> Int -> Reg -> List (Constant, List VMInst) -> Maybe (List VMInst) -> Codegen ()
-getInstForConstCaseChar i r alts def =
+getInstForConstCaseChar : {auto conNames : SortedMap Name Int} -> Reg -> List (Constant, List VMInst) -> Maybe (List VMInst) -> Codegen ()
+getInstForConstCaseChar r alts def =
   do let def' = fromMaybe [(ERROR $ "no default in const case (char)")] def
      assertObjectType r OBJECT_TYPE_ID_CHAR
      caseId <- mkVarName "case_"
@@ -301,7 +301,7 @@ getInstForConstCaseChar i r alts def =
      scrutinee <- unboxChar (reg2val r)
      appendCode $ "  switch " ++ toIR scrutinee ++ ", label %" ++ caseId ++ "_default [ " ++ (showSep "\n      " (map (makeConstCaseLabel caseId) alts)) ++ " ]"
      appendCode $ caseId ++ "_default:"
-     traverse_ (getInstIRWithComment i) def'
+     traverse_ getInstIRWithComment def'
      appendCode $ "br label %" ++ labelEnd
      traverse_ (makeCaseAlt caseId) alts
      appendCode $ labelEnd ++ ":"
@@ -311,12 +311,12 @@ getInstForConstCaseChar i r alts def =
     makeCaseAlt caseId (Ch ch, is) = do
       let c = cast {to=Int} ch
       appendCode $ caseId ++ "_is_" ++ (show c) ++ ":"
-      traverse_ (getInstIRWithComment i) is
+      traverse_ getInstIRWithComment is
       appendCode $ "br label %" ++ caseId ++ "_end"
     makeCaseAlt _ (c, _) = appendCode $ "ERROR: constcase must be Char, got: " ++ show c
 
-getInstForConstCaseString : {auto conNames : SortedMap Name Int} -> Int -> Reg -> List (Constant, List VMInst) -> Maybe (List VMInst) -> Codegen ()
-getInstForConstCaseString i r alts def =
+getInstForConstCaseString : {auto conNames : SortedMap Name Int} -> Reg -> List (Constant, List VMInst) -> Maybe (List VMInst) -> Codegen ()
+getInstForConstCaseString r alts def =
   do let def' = fromMaybe [(ERROR $ "no default in const case (string)")] def
      assertObjectType r OBJECT_TYPE_ID_STR
      scrutinee <- load (reg2val r)
@@ -330,7 +330,7 @@ getInstForConstCaseString i r alts def =
      appendCode $ "br " ++ toIR labelDefault
      beginLabel labelDefault
 
-     traverse_ (getInstIRWithComment i) def'
+     traverse_ getInstIRWithComment def'
      appendCode $ "br " ++ toIR labelEnd
 
      beginLabel labelEnd
@@ -344,13 +344,13 @@ getInstForConstCaseString i r alts def =
       appendCode $ "br " ++ toIR match ++ ", " ++ toIR labelAltStart ++ ", " ++ toIR labelAltNext
       -- compare s == scrut
       beginLabel labelAltStart
-      traverse_ (getInstIRWithComment i) is
+      traverse_ getInstIRWithComment is
       appendCode $ "br " ++ toIR labelEnd
       beginLabel labelAltNext
     makeCaseAlt _ _ _ (_, c, _) = appendCode $ "ERROR: constcase must be Str, got: " ++ show c
 
-getInstForConstCaseInteger : {auto conNames : SortedMap Name Int} -> Int -> Reg -> List (Constant, List VMInst) -> Maybe (List VMInst) -> Codegen ()
-getInstForConstCaseInteger i r alts def =
+getInstForConstCaseInteger : {auto conNames : SortedMap Name Int} -> Reg -> List (Constant, List VMInst) -> Maybe (List VMInst) -> Codegen ()
+getInstForConstCaseInteger r alts def =
   do let def' = fromMaybe [(ERROR $ "no default in const case (Integer)")] def
      assertObjectType r OBJECT_TYPE_ID_BIGINT
      scrutinee <- load (reg2val r)
@@ -364,7 +364,7 @@ getInstForConstCaseInteger i r alts def =
      appendCode $ "br " ++ toIR labelDefault
      beginLabel labelDefault
 
-     traverse_ (getInstIRWithComment i) def'
+     traverse_ getInstIRWithComment def'
      appendCode $ "br " ++ toIR labelEnd
 
      beginLabel labelEnd
@@ -373,11 +373,11 @@ getInstForConstCaseInteger i r alts def =
     makeCaseAlt caseId labelEnd scrutinee (idx, BI bi, is) = do
       let labelAltStart = MkLabel (caseId ++ "_alt_" ++ show idx)
       let labelAltNext = MkLabel (caseId ++ "_next" ++ show idx)
-      compBI <- cgMkConstInteger i bi
+      compBI <- cgMkConstInteger bi
       match <- icmp "eq" (Const I64 0) !(compareInteger compBI scrutinee)
       appendCode $ "br " ++ toIR match ++ ", " ++ toIR labelAltStart ++ ", " ++ toIR labelAltNext
       beginLabel labelAltStart
-      traverse_ (getInstIRWithComment i) is
+      traverse_ getInstIRWithComment is
       appendCode $ "br " ++ toIR labelEnd
       beginLabel labelAltNext
     makeCaseAlt _ _ _ (_, c, _) = appendCode $ "ERROR: constcase must be BI, got: " ++ show c
@@ -610,15 +610,15 @@ genericCast fromType toType src = do
               Nothing => castError fromType toType
        Nothing => castError fromType toType
 
-getInstForConstCaseIntLike : {auto conNames : SortedMap Name Int} -> Constant -> Int -> Reg -> List (Constant, List VMInst) -> Maybe (List VMInst) -> Codegen ()
-getInstForConstCaseIntLike ty i r alts def =
+getInstForConstCaseIntLike : {auto conNames : SortedMap Name Int} -> Constant -> Reg -> List (Constant, List VMInst) -> Maybe (List VMInst) -> Codegen ()
+getInstForConstCaseIntLike ty r alts def =
   do caseId <- mkVarName "case_"
      let def' = fromMaybe [(ERROR $ "no default in const case (int)" ++ caseId)] def
      let labelEnd = caseId ++ "_end"
      scrutinee <- genericIntUnbox ty !(load $ reg2val r)
      appendCode $ "  switch " ++ toIR scrutinee ++ ", label %" ++ caseId ++ "_default [ " ++ (showSep "\n      " (map (makeConstCaseLabel caseId) alts)) ++ " ]"
      appendCode $ caseId ++ "_default:"
-     traverse_ (getInstIRWithComment i) def'
+     traverse_ getInstIRWithComment def'
      appendCode $ "br label %" ++ labelEnd
      traverse_ (makeCaseAlt caseId) alts
      appendCode $ labelEnd ++ ":"
@@ -627,7 +627,7 @@ getInstForConstCaseIntLike ty i r alts def =
     makeCaseAlt : String -> (Constant, List VMInst) -> Codegen ()
     makeCaseAlt caseId (c, is) = do
       appendCode $ makeConstCaseLabelName caseId c ++ ":"
-      traverse_ (getInstIRWithComment i) is
+      traverse_ getInstIRWithComment is
       appendCode $ "br label %" ++ caseId ++ "_end"
 
 integerCmp : String -> Reg -> Reg -> Reg -> Codegen ()
@@ -659,21 +659,21 @@ doubleUnaryFn funcName dest a = do
   result <- call {t=F64} "ccc" ("@" ++ funcName) [toIR val]
   store !(cgMkDouble result) (reg2val dest)
 
-getInstIR : {auto conNames : SortedMap Name Int} -> Int -> VMInst -> Codegen ()
-getInstIR i (DECLARE (Loc r)) = do
+getInstIR : {auto conNames : SortedMap Name Int} -> VMInst -> Codegen ()
+getInstIR (DECLARE (Loc r)) = do
   appendCode $ "  %v" ++ show r ++ "Var = alloca %ObjPtr"
   appendCode $ "  store %ObjPtr null, %ObjPtr* %v" ++ show r ++ "Var"
-getInstIR i (ASSIGN r src) = store !(load (reg2val src)) (reg2val r)
+getInstIR (ASSIGN r src) = store !(load (reg2val src)) (reg2val r)
 
-getInstIR i (OP r Crash [r1, r2]) = do
+getInstIR (OP r Crash [r1, r2]) = do
   msg <- load (reg2val r2)
   appendCode $ "  call ccc void @idris_rts_crash_msg(" ++ toIR msg ++ ") noreturn"
   appendCode $ "unreachable"
-getInstIR i (ERROR s) = mkRuntimeCrash s
-getInstIR i (OP r BelieveMe [_, _, v]) = do
+getInstIR (ERROR s) = mkRuntimeCrash s
+getInstIR (OP r BelieveMe [_, _, v]) = do
   store !(load (reg2val v)) (reg2val r)
 
-getInstIR i (OP r StrHead [r1]) = do
+getInstIR (OP r StrHead [r1]) = do
   assertObjectType r1 OBJECT_TYPE_ID_STR
   o1 <- load (reg2val r1)
   strLength <- getStringByteLength o1
@@ -699,7 +699,7 @@ getInstIR i (OP r StrHead [r1]) = do
 
   beginLabel strHeadFinished
 
-getInstIR i (OP r StrTail [r1]) = do
+getInstIR (OP r StrTail [r1]) = do
   assertObjectType r1 OBJECT_TYPE_ID_STR
   o1 <- load (reg2val r1)
   strLength <- getStringLength o1
@@ -722,7 +722,7 @@ getInstIR i (OP r StrTail [r1]) = do
 
   beginLabel strTailFinished
 
-getInstIR i (OP r StrSubstr [r1, r2, r3]) = do
+getInstIR (OP r StrSubstr [r1, r2, r3]) = do
   assertObjectType r1 OBJECT_TYPE_ID_INT
   assertObjectType r2 OBJECT_TYPE_ID_INT
   assertObjectType r3 OBJECT_TYPE_ID_STR
@@ -732,7 +732,7 @@ getInstIR i (OP r StrSubstr [r1, r2, r3]) = do
   subStr <- mkSubstring o1 offset length
   store subStr (reg2val r)
 
-getInstIR i (OP r StrAppend [r1, r2]) = do
+getInstIR (OP r StrAppend [r1, r2]) = do
   assertObjectType r1 OBJECT_TYPE_ID_STR
   assertObjectType r2 OBJECT_TYPE_ID_STR
   o1 <- load (reg2val r1)
@@ -758,7 +758,7 @@ getInstIR i (OP r StrAppend [r1, r2]) = do
 
   store newStr (reg2val r)
 
-getInstIR i (OP r StrReverse [r1]) = do
+getInstIR (OP r StrReverse [r1]) = do
   assertObjectType r1 OBJECT_TYPE_ID_STR
   strObj <- load (reg2val r1)
   hdr <- getObjectHeader strObj
@@ -775,7 +775,7 @@ getInstIR i (OP r StrReverse [r1]) = do
 
   store newStr (reg2val r)
 
-getInstIR i (OP r StrCons [r1, r2]) = do
+getInstIR (OP r StrCons [r1, r2]) = do
   assertObjectType r1 OBJECT_TYPE_ID_CHAR
   assertObjectType r2 OBJECT_TYPE_ID_STR
   o1 <- load (reg2val r1)
@@ -800,14 +800,14 @@ getInstIR i (OP r StrCons [r1, r2]) = do
 
   store newStr (reg2val r)
 
-getInstIR i (OP r StrLength [r1]) = do
+getInstIR (OP r StrLength [r1]) = do
   assertObjectType r1 OBJECT_TYPE_ID_STR
   strObj <- load (reg2val r1)
   codepointCount <- getStringLength strObj
 
   sizeIntObj <- cgMkInt !(mkZext codepointCount)
   store sizeIntObj (reg2val r)
-getInstIR i (OP r StrIndex [r1, r2]) = do
+getInstIR (OP r StrIndex [r1, r2]) = do
   assertObjectType r1 OBJECT_TYPE_ID_STR
   assertObjectType r2 OBJECT_TYPE_ID_INT
   o1 <- load (reg2val r1)
@@ -822,13 +822,13 @@ getInstIR i (OP r StrIndex [r1, r2]) = do
   newCharObj <- cgMkChar charVal
   store newCharObj (reg2val r)
 
-getInstIR i (OP r (LT  StringType) [r1, r2]) = store !(stringCompare LT  r1 r2) (reg2val r)
-getInstIR i (OP r (LTE StringType) [r1, r2]) = store !(stringCompare LTE r1 r2) (reg2val r)
-getInstIR i (OP r (EQ  StringType) [r1, r2]) = store !(stringCompare EQ  r1 r2) (reg2val r)
-getInstIR i (OP r (GTE StringType) [r1, r2]) = store !(stringCompare GTE r1 r2) (reg2val r)
-getInstIR i (OP r (GT  StringType) [r1, r2]) = store !(stringCompare GT  r1 r2) (reg2val r)
+getInstIR (OP r (LT  StringType) [r1, r2]) = store !(stringCompare LT  r1 r2) (reg2val r)
+getInstIR (OP r (LTE StringType) [r1, r2]) = store !(stringCompare LTE r1 r2) (reg2val r)
+getInstIR (OP r (EQ  StringType) [r1, r2]) = store !(stringCompare EQ  r1 r2) (reg2val r)
+getInstIR (OP r (GTE StringType) [r1, r2]) = store !(stringCompare GTE r1 r2) (reg2val r)
+getInstIR (OP r (GT  StringType) [r1, r2]) = store !(stringCompare GT  r1 r2) (reg2val r)
 
-getInstIR i (OP r (Cast IntegerType StringType) [r1]) = do
+getInstIR (OP r (Cast IntegerType StringType) [r1]) = do
   i1 <- load (reg2val r1)
   s1 <- getObjectSize i1
   u1 <- mkZext {to=I64} !(mkAbs s1)
@@ -858,7 +858,7 @@ getInstIR i (OP r (Cast IntegerType StringType) [r1]) = do
       store newStr (reg2val r)
     )
 
-getInstIR i (OP r (Cast Bits64Type StringType) [r1]) = do
+getInstIR (OP r (Cast Bits64Type StringType) [r1]) = do
   obj <- load (reg2val r1)
   theBits <- unboxBits64 obj
 
@@ -869,7 +869,7 @@ getInstIR i (OP r (Cast Bits64Type StringType) [r1]) = do
   newHeader <- mkHeader OBJECT_TYPE_ID_STR !(mkTrunc length)
   putObjectHeader newStr newHeader
   store newStr (reg2val r)
-getInstIR i (OP r (Cast DoubleType StringType) [r1]) = do
+getInstIR (OP r (Cast DoubleType StringType) [r1]) = do
   obj <- load (reg2val r1)
   theDouble <- getObjectSlot {t=F64} obj 0
 
@@ -885,13 +885,13 @@ getInstIR i (OP r (Cast DoubleType StringType) [r1]) = do
   putObjectHeader newStr newHeader
   store newStr (reg2val r)
 
-getInstIR i (OP r (Cast StringType DoubleType) [r1]) = do
+getInstIR (OP r (Cast StringType DoubleType) [r1]) = do
   strObj <- load (reg2val r1)
   parsedVal <- SSA F64 <$> assignSSA ("  call ccc double @idris_rts_str_to_double(" ++ toIR strObj ++ ")")
   newDouble <- cgMkDouble parsedVal
   store newDouble (reg2val r)
 
-getInstIR i (OP r (Cast CharType StringType) [r1]) = do
+getInstIR (OP r (Cast CharType StringType) [r1]) = do
   o1 <- load (reg2val r1)
   charVal <- unboxChar' o1
   -- maximum length of one codepoint in UTF-8 is 4 bytes
@@ -901,45 +901,45 @@ getInstIR i (OP r (Cast CharType StringType) [r1]) = do
   putObjectHeader newStr !(mkHeader OBJECT_TYPE_ID_STR charLength)
   store newStr (reg2val r)
 
-getInstIR i (OP r (Cast CharType toType) [r1]) = do
+getInstIR (OP r (Cast CharType toType) [r1]) = do
   charVal <- unboxChar' !(load (reg2val r1))
   newInt <- genericIntBox toType !(mkZext charVal)
   store newInt (reg2val r)
 
-getInstIR i (OP r (Add Bits64Type) [r1, r2]) = bits64Binary mkAdd r r1 r2
-getInstIR i (OP r (Sub Bits64Type) [r1, r2]) = bits64Binary mkSub r r1 r2
-getInstIR i (OP r (Mul Bits64Type) [r1, r2]) = bits64Binary mkMul r r1 r2
-getInstIR i (OP r (Div Bits64Type) [r1, r2]) = bits64Binary mkUDiv r r1 r2
-getInstIR i (OP r (Mod Bits64Type) [r1, r2]) = bits64Binary mkURem r r1 r2
-getInstIR i (OP r (BAnd Bits64Type) [r1, r2]) = bits64Binary mkAnd r r1 r2
-getInstIR i (OP r (BOr Bits64Type) [r1, r2]) = bits64Binary mkOr r r1 r2
-getInstIR i (OP r (BXOr Bits64Type) [r1, r2]) = bits64Binary mkXOr r r1 r2
-getInstIR i (OP r (ShiftL Bits64Type) [r1, r2]) = bits64Binary mkShiftL r r1 r2
-getInstIR i (OP r (ShiftR Bits64Type) [r1, r2]) = bits64Binary mkShiftR r r1 r2
+getInstIR (OP r (Add Bits64Type) [r1, r2]) = bits64Binary mkAdd r r1 r2
+getInstIR (OP r (Sub Bits64Type) [r1, r2]) = bits64Binary mkSub r r1 r2
+getInstIR (OP r (Mul Bits64Type) [r1, r2]) = bits64Binary mkMul r r1 r2
+getInstIR (OP r (Div Bits64Type) [r1, r2]) = bits64Binary mkUDiv r r1 r2
+getInstIR (OP r (Mod Bits64Type) [r1, r2]) = bits64Binary mkURem r r1 r2
+getInstIR (OP r (BAnd Bits64Type) [r1, r2]) = bits64Binary mkAnd r r1 r2
+getInstIR (OP r (BOr Bits64Type) [r1, r2]) = bits64Binary mkOr r r1 r2
+getInstIR (OP r (BXOr Bits64Type) [r1, r2]) = bits64Binary mkXOr r r1 r2
+getInstIR (OP r (ShiftL Bits64Type) [r1, r2]) = bits64Binary mkShiftL r r1 r2
+getInstIR (OP r (ShiftR Bits64Type) [r1, r2]) = bits64Binary mkShiftR r r1 r2
 
-getInstIR i (OP r (Add Int64Type) [r1, r2]) = bits64Binary mkAdd r r1 r2
-getInstIR i (OP r (Sub Int64Type) [r1, r2]) = bits64Binary mkSub r r1 r2
-getInstIR i (OP r (Mul Int64Type) [r1, r2]) = bits64Binary mkMul r r1 r2
-getInstIR i (OP r (Div Int64Type) [r1, r2]) = bits64Binary mkSDiv r r1 r2
-getInstIR i (OP r (Mod Int64Type) [r1, r2]) = bits64Binary mkSRem r r1 r2
-getInstIR i (OP r (BAnd Int64Type) [r1, r2]) = bits64Binary mkAnd r r1 r2
-getInstIR i (OP r (BOr Int64Type) [r1, r2]) = bits64Binary mkOr r r1 r2
-getInstIR i (OP r (BXOr Int64Type) [r1, r2]) = bits64Binary mkXOr r r1 r2
-getInstIR i (OP r (ShiftL Int64Type) [r1, r2]) = bits64Binary mkShiftL r r1 r2
-getInstIR i (OP r (ShiftR Int64Type) [r1, r2]) = bits64Binary mkAShiftR r r1 r2
+getInstIR (OP r (Add Int64Type) [r1, r2]) = bits64Binary mkAdd r r1 r2
+getInstIR (OP r (Sub Int64Type) [r1, r2]) = bits64Binary mkSub r r1 r2
+getInstIR (OP r (Mul Int64Type) [r1, r2]) = bits64Binary mkMul r r1 r2
+getInstIR (OP r (Div Int64Type) [r1, r2]) = bits64Binary mkSDiv r r1 r2
+getInstIR (OP r (Mod Int64Type) [r1, r2]) = bits64Binary mkSRem r r1 r2
+getInstIR (OP r (BAnd Int64Type) [r1, r2]) = bits64Binary mkAnd r r1 r2
+getInstIR (OP r (BOr Int64Type) [r1, r2]) = bits64Binary mkOr r r1 r2
+getInstIR (OP r (BXOr Int64Type) [r1, r2]) = bits64Binary mkXOr r r1 r2
+getInstIR (OP r (ShiftL Int64Type) [r1, r2]) = bits64Binary mkShiftL r r1 r2
+getInstIR (OP r (ShiftR Int64Type) [r1, r2]) = bits64Binary mkAShiftR r r1 r2
 
-getInstIR i (OP r (Add IntType) [r1, r2]) = intBinary mkAdd r r1 r2
-getInstIR i (OP r (Sub IntType) [r1, r2]) = intBinary mkSub r r1 r2
-getInstIR i (OP r (Mul IntType) [r1, r2]) = intBinary mkMul r r1 r2
-getInstIR i (OP r (Div IntType) [r1, r2]) = intBinary mkSDiv r r1 r2
-getInstIR i (OP r (Mod IntType) [r1, r2]) = intBinary mkSRem r r1 r2
-getInstIR i (OP r (BAnd IntType) [r1, r2]) = intBinary mkAnd r r1 r2
-getInstIR i (OP r (BOr IntType) [r1, r2]) = intBinary mkOr r r1 r2
-getInstIR i (OP r (BXOr IntType) [r1, r2]) = intBinary mkXOr r r1 r2
-getInstIR i (OP r (ShiftL IntType) [r1, r2]) = intBinary mkShiftL r r1 r2
-getInstIR i (OP r (ShiftR IntType) [r1, r2]) = intBinary mkShiftR r r1 r2
+getInstIR (OP r (Add IntType) [r1, r2]) = intBinary mkAdd r r1 r2
+getInstIR (OP r (Sub IntType) [r1, r2]) = intBinary mkSub r r1 r2
+getInstIR (OP r (Mul IntType) [r1, r2]) = intBinary mkMul r r1 r2
+getInstIR (OP r (Div IntType) [r1, r2]) = intBinary mkSDiv r r1 r2
+getInstIR (OP r (Mod IntType) [r1, r2]) = intBinary mkSRem r r1 r2
+getInstIR (OP r (BAnd IntType) [r1, r2]) = intBinary mkAnd r r1 r2
+getInstIR (OP r (BOr IntType) [r1, r2]) = intBinary mkOr r r1 r2
+getInstIR (OP r (BXOr IntType) [r1, r2]) = intBinary mkXOr r r1 r2
+getInstIR (OP r (ShiftL IntType) [r1, r2]) = intBinary mkShiftL r r1 r2
+getInstIR (OP r (ShiftR IntType) [r1, r2]) = intBinary mkShiftR r r1 r2
 
-getInstIR i (OP r (Add IntegerType) [r1, r2]) = do
+getInstIR (OP r (Add IntegerType) [r1, r2]) = do
   i1 <- load (reg2val r1)
   i2 <- load (reg2val r2)
 
@@ -949,7 +949,7 @@ getInstIR i (OP r (Add IntegerType) [r1, r2]) = do
   signsMatch <- icmp "sge" sx (Const I32 0)
   obj <- mkIf (pure signsMatch) (addInteger i1 i2) (subInteger i1 i2)
   store obj (reg2val r)
-getInstIR i (OP r (Sub IntegerType) [r1, r2]) = do
+getInstIR (OP r (Sub IntegerType) [r1, r2]) = do
   i1 <- load (reg2val r1)
   i2 <- load (reg2val r2)
 
@@ -959,16 +959,16 @@ getInstIR i (OP r (Sub IntegerType) [r1, r2]) = do
   signsMatch <- icmp "sge" sx (Const I32 0)
   obj <- mkIf (pure signsMatch) (subInteger i1 i2) (addInteger i1 i2)
   store obj (reg2val r)
-getInstIR i (OP r (Mul IntegerType) [r1, r2]) = objBinary mulInteger r r1 r2
-getInstIR i (OP r (Div IntegerType) [r1, r2]) = objBinary divIntegerQuotient r r1 r2
-getInstIR i (OP r (Mod IntegerType) [r1, r2]) = objBinary divIntegerRemainder r r1 r2
-getInstIR i (OP r (ShiftL IntegerType) [r1, r2]) = objBinary shiftLeftInteger r r1 r2
-getInstIR i (OP r (ShiftR IntegerType) [r1, r2]) = objBinary shiftRightInteger r r1 r2
-getInstIR i (OP r (BAnd IntegerType) [r1, r2]) = objBinary andInteger r r1 r2
-getInstIR i (OP r (BOr IntegerType) [r1, r2]) = objBinary orInteger r r1 r2
-getInstIR i (OP r (BXOr IntegerType) [r1, r2]) = objBinary xorInteger r r1 r2
+getInstIR (OP r (Mul IntegerType) [r1, r2]) = objBinary mulInteger r r1 r2
+getInstIR (OP r (Div IntegerType) [r1, r2]) = objBinary divIntegerQuotient r r1 r2
+getInstIR (OP r (Mod IntegerType) [r1, r2]) = objBinary divIntegerRemainder r r1 r2
+getInstIR (OP r (ShiftL IntegerType) [r1, r2]) = objBinary shiftLeftInteger r r1 r2
+getInstIR (OP r (ShiftR IntegerType) [r1, r2]) = objBinary shiftRightInteger r r1 r2
+getInstIR (OP r (BAnd IntegerType) [r1, r2]) = objBinary andInteger r r1 r2
+getInstIR (OP r (BOr IntegerType) [r1, r2]) = objBinary orInteger r r1 r2
+getInstIR (OP r (BXOr IntegerType) [r1, r2]) = objBinary xorInteger r r1 r2
 
-getInstIR i (OP r (LT CharType) [r1, r2]) = do
+getInstIR (OP r (LT CharType) [r1, r2]) = do
   -- compare Chars by comparing their headers
   o1 <- load (reg2val r1)
   o2 <- load (reg2val r2)
@@ -978,7 +978,7 @@ getInstIR i (OP r (LT CharType) [r1, r2]) = do
   cmp_i64 <- assignSSA $ "zext " ++ toIR cmp_i1 ++ " to i64"
   obj <- cgMkInt (SSA I64 cmp_i64)
   store obj (reg2val r)
-getInstIR i (OP r (LTE CharType) [r1, r2]) = do
+getInstIR (OP r (LTE CharType) [r1, r2]) = do
   -- compare Chars by comparing their headers
   o1 <- load (reg2val r1)
   o2 <- load (reg2val r2)
@@ -988,7 +988,7 @@ getInstIR i (OP r (LTE CharType) [r1, r2]) = do
   cmp_i64 <- assignSSA $ "zext " ++ toIR cmp_i1 ++ " to i64"
   obj <- cgMkInt (SSA I64 cmp_i64)
   store obj (reg2val r)
-getInstIR i (OP r (GTE CharType) [r1, r2]) = do
+getInstIR (OP r (GTE CharType) [r1, r2]) = do
   -- compare Chars by comparing their headers
   o1 <- load (reg2val r1)
   o2 <- load (reg2val r2)
@@ -998,7 +998,7 @@ getInstIR i (OP r (GTE CharType) [r1, r2]) = do
   cmp_i64 <- assignSSA $ "zext " ++ toIR cmp_i1 ++ " to i64"
   obj <- cgMkInt (SSA I64 cmp_i64)
   store obj (reg2val r)
-getInstIR i (OP r (GT CharType) [r1, r2]) = do
+getInstIR (OP r (GT CharType) [r1, r2]) = do
   -- compare Chars by comparing their headers
   o1 <- load (reg2val r1)
   o2 <- load (reg2val r2)
@@ -1008,7 +1008,7 @@ getInstIR i (OP r (GT CharType) [r1, r2]) = do
   cmp_i64 <- assignSSA $ "zext " ++ toIR cmp_i1 ++ " to i64"
   obj <- cgMkInt (SSA I64 cmp_i64)
   store obj (reg2val r)
-getInstIR i (OP r (EQ CharType) [r1, r2]) = do
+getInstIR (OP r (EQ CharType) [r1, r2]) = do
   -- Two Chars are equal, iff their headers are equal
   o1 <- load (reg2val r1)
   o2 <- load (reg2val r2)
@@ -1019,7 +1019,7 @@ getInstIR i (OP r (EQ CharType) [r1, r2]) = do
   obj <- cgMkInt (SSA I64 cmp_i64)
   store obj (reg2val r)
 
-getInstIR i (OP r (LT Bits8Type) [r1, r2]) = do
+getInstIR (OP r (LT Bits8Type) [r1, r2]) = do
   i1 <- unboxInt (reg2val r1)
   i2 <- unboxInt (reg2val r2)
   vsum_i1 <- icmp "ult" i1 i2
@@ -1027,35 +1027,35 @@ getInstIR i (OP r (LT Bits8Type) [r1, r2]) = do
   obj <- cgMkInt vsum_i64
   store obj (reg2val r)
 
-getInstIR i (OP r (LT IntType) [r1, r2]) = do
+getInstIR (OP r (LT IntType) [r1, r2]) = do
   i1 <- unboxInt (reg2val r1)
   i2 <- unboxInt (reg2val r2)
   vsum_i1 <- icmp "slt" i1 i2
   vsum_i64 <- mkZext {to=I64} vsum_i1
   obj <- cgMkInt vsum_i64
   store obj (reg2val r)
-getInstIR i (OP r (LTE IntType) [r1, r2]) = do
+getInstIR (OP r (LTE IntType) [r1, r2]) = do
   i1 <- unboxInt (reg2val r1)
   i2 <- unboxInt (reg2val r2)
   vsum_i1 <- icmp "sle" i1 i2
   vsum_i64 <- mkZext {to=I64} vsum_i1
   obj <- cgMkInt vsum_i64
   store obj (reg2val r)
-getInstIR i (OP r (EQ IntType) [r1, r2]) = do
+getInstIR (OP r (EQ IntType) [r1, r2]) = do
   i1 <- unboxInt (reg2val r1)
   i2 <- unboxInt (reg2val r2)
   vsum_i1 <- icmp "eq" i1 i2
   vsum_i64 <- mkZext {to=I64} vsum_i1
   obj <- cgMkInt vsum_i64
   store obj (reg2val r)
-getInstIR i (OP r (GTE IntType) [r1, r2]) = do
+getInstIR (OP r (GTE IntType) [r1, r2]) = do
   i1 <- unboxInt (reg2val r1)
   i2 <- unboxInt (reg2val r2)
   vsum_i1 <- icmp "sge" i1 i2
   vsum_i64 <- mkZext {to=I64} vsum_i1
   obj <- cgMkInt vsum_i64
   store obj (reg2val r)
-getInstIR i (OP r (GT IntType) [r1, r2]) = do
+getInstIR (OP r (GT IntType) [r1, r2]) = do
   i1 <- unboxInt (reg2val r1)
   i2 <- unboxInt (reg2val r2)
   vsum_i1 <- icmp "sgt" i1 i2
@@ -1063,66 +1063,66 @@ getInstIR i (OP r (GT IntType) [r1, r2]) = do
   obj <- cgMkInt vsum_i64
   store obj (reg2val r)
 
-getInstIR i (OP r (LT  IntegerType) [r1, r2]) = integerCmp "slt" r r1 r2
-getInstIR i (OP r (LTE IntegerType) [r1, r2]) = integerCmp "sle" r r1 r2
-getInstIR i (OP r (EQ  IntegerType) [r1, r2]) = integerCmp "eq"  r r1 r2
-getInstIR i (OP r (GTE IntegerType) [r1, r2]) = integerCmp "sge" r r1 r2
-getInstIR i (OP r (GT  IntegerType) [r1, r2]) = integerCmp "sgt" r r1 r2
+getInstIR (OP r (LT  IntegerType) [r1, r2]) = integerCmp "slt" r r1 r2
+getInstIR (OP r (LTE IntegerType) [r1, r2]) = integerCmp "sle" r r1 r2
+getInstIR (OP r (EQ  IntegerType) [r1, r2]) = integerCmp "eq"  r r1 r2
+getInstIR (OP r (GTE IntegerType) [r1, r2]) = integerCmp "sge" r r1 r2
+getInstIR (OP r (GT  IntegerType) [r1, r2]) = integerCmp "sgt" r r1 r2
 
-getInstIR i (OP r (Cast fromType toType) [r1]) = do
+getInstIR (OP r (Cast fromType toType) [r1]) = do
   castedObj <- genericCast fromType toType !(load (reg2val r1))
   store castedObj (reg2val r)
 
-getInstIR i (OP r (LT  DoubleType) [r1, r2]) = doubleCmp "olt" r r1 r2
-getInstIR i (OP r (LTE DoubleType) [r1, r2]) = doubleCmp "ole" r r1 r2
-getInstIR i (OP r (EQ  DoubleType) [r1, r2]) = doubleCmp "oeq" r r1 r2
-getInstIR i (OP r (GTE DoubleType) [r1, r2]) = doubleCmp "oge" r r1 r2
-getInstIR i (OP r (GT  DoubleType) [r1, r2]) = doubleCmp "ogt" r r1 r2
+getInstIR (OP r (LT  DoubleType) [r1, r2]) = doubleCmp "olt" r r1 r2
+getInstIR (OP r (LTE DoubleType) [r1, r2]) = doubleCmp "ole" r r1 r2
+getInstIR (OP r (EQ  DoubleType) [r1, r2]) = doubleCmp "oeq" r r1 r2
+getInstIR (OP r (GTE DoubleType) [r1, r2]) = doubleCmp "oge" r r1 r2
+getInstIR (OP r (GT  DoubleType) [r1, r2]) = doubleCmp "ogt" r r1 r2
 
-getInstIR i (OP r (Add DoubleType) [r1, r2]) = doubleBinOp "fadd" r r1 r2
-getInstIR i (OP r (Sub DoubleType) [r1, r2]) = doubleBinOp "fsub" r r1 r2
-getInstIR i (OP r (Mul DoubleType) [r1, r2]) = doubleBinOp "fmul" r r1 r2
-getInstIR i (OP r (Div DoubleType) [r1, r2]) = doubleBinOp "fdiv" r r1 r2
-getInstIR i (OP r (Mod DoubleType) [r1, r2]) = doubleBinOp "frem" r r1 r2
-getInstIR i (OP r (Neg DoubleType) [r1]) = do
+getInstIR (OP r (Add DoubleType) [r1, r2]) = doubleBinOp "fadd" r r1 r2
+getInstIR (OP r (Sub DoubleType) [r1, r2]) = doubleBinOp "fsub" r r1 r2
+getInstIR (OP r (Mul DoubleType) [r1, r2]) = doubleBinOp "fmul" r r1 r2
+getInstIR (OP r (Div DoubleType) [r1, r2]) = doubleBinOp "fdiv" r r1 r2
+getInstIR (OP r (Mod DoubleType) [r1, r2]) = doubleBinOp "frem" r r1 r2
+getInstIR (OP r (Neg DoubleType) [r1]) = do
   fv <- unboxFloat64 (reg2val r1)
   neg <- (SSA F64) <$> assignSSA ("fneg " ++ toIR fv)
   obj <- cgMkDouble neg
   store obj (reg2val r)
 
-getInstIR i (OP r DoubleExp [r1]) = doubleUnaryFn "llvm.exp.f64" r r1
-getInstIR i (OP r DoubleLog [r1]) = doubleUnaryFn "llvm.log.f64" r r1
-getInstIR i (OP r DoubleSin [r1]) = doubleUnaryFn "llvm.sin.f64" r r1
-getInstIR i (OP r DoubleCos [r1]) = doubleUnaryFn "llvm.cos.f64" r r1
-getInstIR i (OP r DoubleTan [r1]) = doubleUnaryFn "tan" r r1
-getInstIR i (OP r DoubleASin [r1]) = doubleUnaryFn "asin" r r1
-getInstIR i (OP r DoubleACos [r1]) = doubleUnaryFn "acos" r r1
-getInstIR i (OP r DoubleATan [r1]) = doubleUnaryFn "atan" r r1
-getInstIR i (OP r DoubleSqrt [r1]) = doubleUnaryFn "llvm.sqrt.f64" r r1
-getInstIR i (OP r DoubleFloor [r1]) = doubleUnaryFn "llvm.floor.f64" r r1
-getInstIR i (OP r DoubleCeiling [r1]) = doubleUnaryFn "llvm.ceil.f64" r r1
+getInstIR (OP r DoubleExp [r1]) = doubleUnaryFn "llvm.exp.f64" r r1
+getInstIR (OP r DoubleLog [r1]) = doubleUnaryFn "llvm.log.f64" r r1
+getInstIR (OP r DoubleSin [r1]) = doubleUnaryFn "llvm.sin.f64" r r1
+getInstIR (OP r DoubleCos [r1]) = doubleUnaryFn "llvm.cos.f64" r r1
+getInstIR (OP r DoubleTan [r1]) = doubleUnaryFn "tan" r r1
+getInstIR (OP r DoubleASin [r1]) = doubleUnaryFn "asin" r r1
+getInstIR (OP r DoubleACos [r1]) = doubleUnaryFn "acos" r r1
+getInstIR (OP r DoubleATan [r1]) = doubleUnaryFn "atan" r r1
+getInstIR (OP r DoubleSqrt [r1]) = doubleUnaryFn "llvm.sqrt.f64" r r1
+getInstIR (OP r DoubleFloor [r1]) = doubleUnaryFn "llvm.floor.f64" r r1
+getInstIR (OP r DoubleCeiling [r1]) = doubleUnaryFn "llvm.ceil.f64" r r1
 
-getInstIR i (OP r (Add ty) [r1, r2]) = boundedIntBinary' (intKind ty) mkAddNoWrap mkAddNoWrap r r1 r2
-getInstIR i (OP r (Sub ty) [r1, r2]) = boundedIntBinary' (intKind ty) mkSub mkSub r r1 r2
-getInstIR i (OP r (Mul ty) [r1, r2]) = boundedIntBinary' (intKind ty) mkMul mkMul r r1 r2
-getInstIR i (OP r (Div ty) [r1, r2]) = boundedIntBinary' (intKind ty) mkUDiv mkSDiv r r1 r2
-getInstIR i (OP r (Mod ty) [r1, r2]) = boundedIntBinary' (intKind ty) mkURem mkSRem r r1 r2
-getInstIR i (OP r (BAnd ty) [r1, r2]) = boundedIntBinary' (intKind ty) mkAnd mkAnd r r1 r2
-getInstIR i (OP r (BOr ty) [r1, r2]) = boundedIntBinary' (intKind ty) mkOr mkOr r r1 r2
-getInstIR i (OP r (BXOr ty) [r1, r2]) = boundedIntBinary' (intKind ty) mkXOr mkXOr r r1 r2
-getInstIR i (OP r (ShiftL ty) [r1, r2]) = boundedIntBinary' (intKind ty) mkShiftL mkShiftL r r1 r2
-getInstIR i (OP r (ShiftR ty) [r1, r2]) = boundedIntBinary' (intKind ty) mkShiftR mkAShiftR r r1 r2
+getInstIR (OP r (Add ty) [r1, r2]) = boundedIntBinary' (intKind ty) mkAddNoWrap mkAddNoWrap r r1 r2
+getInstIR (OP r (Sub ty) [r1, r2]) = boundedIntBinary' (intKind ty) mkSub mkSub r r1 r2
+getInstIR (OP r (Mul ty) [r1, r2]) = boundedIntBinary' (intKind ty) mkMul mkMul r r1 r2
+getInstIR (OP r (Div ty) [r1, r2]) = boundedIntBinary' (intKind ty) mkUDiv mkSDiv r r1 r2
+getInstIR (OP r (Mod ty) [r1, r2]) = boundedIntBinary' (intKind ty) mkURem mkSRem r r1 r2
+getInstIR (OP r (BAnd ty) [r1, r2]) = boundedIntBinary' (intKind ty) mkAnd mkAnd r r1 r2
+getInstIR (OP r (BOr ty) [r1, r2]) = boundedIntBinary' (intKind ty) mkOr mkOr r r1 r2
+getInstIR (OP r (BXOr ty) [r1, r2]) = boundedIntBinary' (intKind ty) mkXOr mkXOr r r1 r2
+getInstIR (OP r (ShiftL ty) [r1, r2]) = boundedIntBinary' (intKind ty) mkShiftL mkShiftL r r1 r2
+getInstIR (OP r (ShiftR ty) [r1, r2]) = boundedIntBinary' (intKind ty) mkShiftR mkAShiftR r r1 r2
 
-getInstIR i (OP r (LT  ty) [r1, r2]) = intCompare' (intKind ty) "ult" "slt" r r1 r2
-getInstIR i (OP r (LTE ty) [r1, r2]) = intCompare' (intKind ty) "ule" "sle" r r1 r2
-getInstIR i (OP r (EQ  ty) [r1, r2]) = intCompare' (intKind ty) "eq"  "eq"  r r1 r2
-getInstIR i (OP r (GTE ty) [r1, r2]) = intCompare' (intKind ty) "uge" "sge" r r1 r2
-getInstIR i (OP r (GT  ty) [r1, r2]) = intCompare' (intKind ty) "ugt" "sgt" r r1 r2
+getInstIR (OP r (LT  ty) [r1, r2]) = intCompare' (intKind ty) "ult" "slt" r r1 r2
+getInstIR (OP r (LTE ty) [r1, r2]) = intCompare' (intKind ty) "ule" "sle" r r1 r2
+getInstIR (OP r (EQ  ty) [r1, r2]) = intCompare' (intKind ty) "eq"  "eq"  r r1 r2
+getInstIR (OP r (GTE ty) [r1, r2]) = intCompare' (intKind ty) "uge" "sge" r r1 r2
+getInstIR (OP r (GT  ty) [r1, r2]) = intCompare' (intKind ty) "ugt" "sgt" r r1 r2
 
-getInstIR i (MKCON r (Left tag) args) = do
+getInstIR (MKCON r (Left tag) args) = do
   obj <- mkCon tag !(traverse prepareArg args)
   store obj (reg2val r)
-getInstIR {conNames} i (MKCON r (Right n) args) = do
+getInstIR {conNames} (MKCON r (Right n) args) = do
   case lookup n conNames of
        Just nameId => do
          loadedArgs <- traverse prepareArg args
@@ -1130,7 +1130,7 @@ getInstIR {conNames} i (MKCON r (Right n) args) = do
          store obj (reg2val r)
        Nothing => addError $ "MKCON name not found: " ++ show n
 
-getInstIR i (MKCLOSURE r n missingN args) = do
+getInstIR (MKCLOSURE r n missingN args) = do
   let missing = cast {to=Int} missingN
   let len = cast {to=Int} $ length args
   let totalArgsExpected = missing + len
@@ -1154,7 +1154,7 @@ getInstIR i (MKCLOSURE r n missingN args) = do
                               )
   store newObj (reg2val r)
 
-getInstIR i (APPLY r fun arg) = do
+getInstIR (APPLY r fun arg) = do
   hp <- ((++) "%RuntimePtr ") <$> assignSSA "load %RuntimePtr, %RuntimePtr* %HpVar"
   hpLim <- ((++) "%RuntimePtr ") <$> assignSSA "load %RuntimePtr, %RuntimePtr* %HpLimVar"
   let base = "%TSOPtr %BaseArg"
@@ -1179,55 +1179,55 @@ getInstIR i (APPLY r fun arg) = do
 
   pure ()
 
-getInstIR i (MKCONSTANT r (Ch c)) = do
+getInstIR (MKCONSTANT r (Ch c)) = do
   newObj <- cgMkChar (Const I32 $ cast c)
   store newObj (reg2val r)
-getInstIR i (MKCONSTANT r (B8 c)) = do
+getInstIR (MKCONSTANT r (B8 c)) = do
   obj <- cgMkInt (ConstI64 $ cast c)
   store obj (reg2val r)
-getInstIR i (MKCONSTANT r (B16 c)) = do
+getInstIR (MKCONSTANT r (B16 c)) = do
   obj <- cgMkInt (ConstI64 $ cast c)
   store obj (reg2val r)
-getInstIR i (MKCONSTANT r (B32 c)) = do
+getInstIR (MKCONSTANT r (B32 c)) = do
   obj <- cgMkInt (ConstI64 $ cast c)
   store obj (reg2val r)
-getInstIR i (MKCONSTANT r (B64 c)) = do
+getInstIR (MKCONSTANT r (B64 c)) = do
   obj <- cgMkBits64 (ConstI64 $ cast c)
   store obj (reg2val r)
-getInstIR i (MKCONSTANT r (I8 c)) = do
+getInstIR (MKCONSTANT r (I8 c)) = do
   obj <- cgMkInt (ConstI64 $ cast c)
   store obj (reg2val r)
-getInstIR i (MKCONSTANT r (I16 c)) = do
+getInstIR (MKCONSTANT r (I16 c)) = do
   obj <- cgMkInt (ConstI64 $ cast c)
   store obj (reg2val r)
-getInstIR i (MKCONSTANT r (I32 c)) = do
+getInstIR (MKCONSTANT r (I32 c)) = do
   obj <- cgMkInt (ConstI64 $ cast c)
   store obj (reg2val r)
-getInstIR i (MKCONSTANT r (I64 c)) = do
+getInstIR (MKCONSTANT r (I64 c)) = do
   obj <- cgMkBits64 (ConstI64 $ cast c)
   store obj (reg2val r)
-getInstIR i (MKCONSTANT r (I c)) = do
+getInstIR (MKCONSTANT r (I c)) = do
   obj <- cgMkInt (ConstI64 $ (cast {to=Integer} c) `mod` 0x7fffffffffffffff)
   store obj (reg2val r)
-getInstIR i (MKCONSTANT r (BI c)) = do
-  obj <- cgMkConstInteger i c
+getInstIR (MKCONSTANT r (BI c)) = do
+  obj <- cgMkConstInteger c
   store obj (reg2val r)
-getInstIR i (MKCONSTANT r (Db d)) = do
+getInstIR (MKCONSTANT r (Db d)) = do
   obj <- cgMkConstDouble d
   store obj (reg2val r)
-getInstIR i (MKCONSTANT r WorldVal) = do
+getInstIR (MKCONSTANT r WorldVal) = do
   obj <- mkCon 1337 []
   store obj (reg2val r)
-getInstIR i (MKCONSTANT r (Str s)) = store !(mkStr s) (reg2val r)
+getInstIR (MKCONSTANT r (Str s)) = store !(mkStr s) (reg2val r)
 
-getInstIR i (CONSTCASE r alts def) = case findConstCaseType alts of
-                                          Right (IntLikeCase ty) => getInstForConstCaseIntLike ty i r alts def
-                                          Right BigIntCase => getInstForConstCaseInteger i r alts def
-                                          Right StringCase => getInstForConstCaseString i r alts def
-                                          Right CharCase => getInstForConstCaseChar i r alts def
+getInstIR (CONSTCASE r alts def) = case findConstCaseType alts of
+                                          Right (IntLikeCase ty) => getInstForConstCaseIntLike ty r alts def
+                                          Right BigIntCase => getInstForConstCaseInteger r alts def
+                                          Right StringCase => getInstForConstCaseString r alts def
+                                          Right CharCase => getInstForConstCaseChar r alts def
                                           Left err => addError ("constcase error: " ++ err)
 
-getInstIR {conNames} i (CASE r alts def) =
+getInstIR {conNames} (CASE r alts def) =
   do let def' = fromMaybe [(ERROR $ "no default in CASE")] def
      --appendCode $ "call ccc i32 @dump_obj(" ++ toIR !(load $ reg2val r) ++ ") "
      assertObjectType r OBJECT_TYPE_ID_CON_NO_ARGS
@@ -1239,7 +1239,7 @@ getInstIR {conNames} i (CASE r alts def) =
      scrutinee <- assignSSA $ "and i64 " ++ (show 0xffffffff) ++ ", " ++ showWithoutType header
      appendCode $ "  switch i64 " ++ scrutinee ++ ", label %" ++ caseId ++ "_default [ " ++ (showSep "\n      " !(traverse (makeCaseLabel caseId) alts)) ++ " ]"
      appendCode $ caseId ++ "_default:"
-     traverse_ (getInstIRWithComment i) def'
+     traverse_ getInstIRWithComment def'
      appendCode $ "br label %" ++ labelEnd
      traverse_ (makeCaseAlt caseId) alts
      appendCode $ labelEnd ++ ":"
@@ -1248,18 +1248,18 @@ getInstIR {conNames} i (CASE r alts def) =
     makeCaseAlt : String -> (Either Int Name, List VMInst) -> Codegen ()
     makeCaseAlt caseId (Left c, is) = do
       appendCode $ caseId ++ "_tag_is_" ++ (show c) ++ ":"
-      traverse_ (getInstIRWithComment i) is
+      traverse_ getInstIRWithComment is
       appendCode $ "br label %" ++ caseId ++ "_end"
     makeCaseAlt caseId (Right n, is) =
       case lookup n conNames of
            Just nameId => do
              appendCode $ "; " ++ (show n) ++ " -> " ++ (show nameId)
              appendCode (caseId ++ "_name_is_" ++ (show (makeNameId nameId)) ++ ":")
-             traverse_ (getInstIRWithComment i) is
+             traverse_ getInstIRWithComment is
              appendCode ("br label %" ++ caseId ++ "_end")
            Nothing => addError $ "name for case not found: " ++ show n
 
-getInstIR i (CALL r tailpos n args) =
+getInstIR (CALL r tailpos n args) =
   do argsV <- traverse prepareArg args
      hp <- ((++) "%RuntimePtr ") <$> assignSSA "load %RuntimePtr, %RuntimePtr* %HpVar"
      hpLim <- ((++) "%RuntimePtr ") <$> assignSSA "load %RuntimePtr, %RuntimePtr* %HpLimVar"
@@ -1279,27 +1279,27 @@ getInstIR i (CALL r tailpos n args) =
      appendCode $ "store %ObjPtr " ++ returnValue ++ ", %ObjPtr* " ++ toIR r ++ "Var"
      pure ()
 
-getInstIR i (PROJECT r o pos) = do
+getInstIR (PROJECT r o pos) = do
   assertObjectType o OBJECT_TYPE_ID_CON_NO_ARGS
   obj <- load {t=IRObjPtr} (reg2val o)
   slot <- getObjectSlot {t=IRObjPtr} obj pos
   assertObjectTypeAny slot 0xf0
   store slot (reg2val r)
 
-getInstIR i (EXTPRIM r n args) = do
+getInstIR (EXTPRIM r n args) = do
   loadedArgs <- traverse prepareArg args
   result <- compileExtPrim n loadedArgs
   store result (reg2val r)
 
-getInstIR i START = pure ()
-getInstIR i inst = do
+getInstIR START = pure ()
+getInstIR inst = do
   addError $ "NOT IMPLEMENTED: " ++ show inst
   mkRuntimeCrash ("NOT IMPLEMENTED: " ++ show inst)
 
-getInstIRWithComment : {auto conNames : SortedMap Name Int} -> Int -> VMInst -> Codegen ()
-getInstIRWithComment i instr = do
+getInstIRWithComment : {auto conNames : SortedMap Name Int} -> VMInst -> Codegen ()
+getInstIRWithComment instr = do
   --appendCode (instrAsComment instr)
-  getInstIR i instr
+  getInstIR instr
 
 appendMetadata : Int -> String -> Codegen String
 appendMetadata o value = do
@@ -1321,7 +1321,7 @@ getFunIR conNames i n args body = do
     appendCode "entry:"
     funcEntry
     traverse_ appendCode (map copyArg args)
-    traverse_ (getInstIRWithComment i) body
+    traverse_ getInstIRWithComment body
     funcReturn
     appendCode "}\n"
   where
@@ -1339,7 +1339,7 @@ getFunIRClosureEntry conNames i n args body = do
     traverse_ copyArg (enumerate $ init args)
     appendCode $ "  %v" ++ (show $ last args) ++ "Var = alloca %ObjPtr"
     store (SSA IRObjPtr "%lastArg") (reg2val $ Loc $ last args)
-    traverse_ (getInstIRWithComment i) body
+    traverse_ getInstIRWithComment body
     funcReturn
     appendCode "}\n"
   where

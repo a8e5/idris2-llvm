@@ -30,8 +30,8 @@ twosComplement : Num a => Bits a => a -> a
 twosComplement x = 1 + (complement x)
 
 export
-cgMkConstInteger : Int -> Integer -> Codegen (IRValue IRObjPtr)
-cgMkConstInteger i val =
+cgMkConstInteger : Integer -> Codegen (IRValue IRObjPtr)
+cgMkConstInteger val =
     do
       let absVal = abs val
       let (len ** limbs) = getLimbs absVal
