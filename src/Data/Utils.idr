@@ -72,4 +72,4 @@ showSep sep xs = showSepGo True xs "" where
   showSepGo : Bool -> List String -> String -> String
   showSepGo first [] acc = acc
   showSepGo first (x::xs) acc = if first then showSepGo False xs (acc ++ x)
-                                         else showSepGo False xs (acc ++ " " ++ x)
+                                         else showSepGo False xs (acc ++ sep ++ x)
