@@ -317,12 +317,6 @@ getStringByteLength : IRValue IRObjPtr -> Codegen (IRValue I32)
 getStringByteLength = getObjectSize
 
 export
-getStringLength : IRValue IRObjPtr -> Codegen (IRValue I32)
-getStringLength strObj = do
-  strLenBytes <- getStringByteLength strObj
-  call {t=I32} "ccc" "@utf8_bytes_to_codepoints" [toIR !(getObjectPayloadAddr {t=I8} strObj), toIR strLenBytes]
-
-export
 mkUnit : Codegen (IRValue IRObjPtr)
 mkUnit = mkCon 0 []
 

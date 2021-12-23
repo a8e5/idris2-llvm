@@ -15,6 +15,7 @@ import Compiler.LLVM.Rapid.Integer
 import Compiler.LLVM.Rapid.Builtin
 import Compiler.LLVM.Rapid.Foreign
 import Compiler.LLVM.Rapid.Object
+import Compiler.LLVM.Rapid.String
 import Control.Codegen
 import Core.TT
 import Data.Utils
@@ -47,12 +48,6 @@ argIR : Reg -> Codegen String
 argIR (Loc i) = pure $ "%ObjPtr %v" ++ show i
 argIR _ = pure $ "undef"
 
-TARGET_SIZE_T : IRType
-TARGET_SIZE_T = I64
-
-MP_LIMB_T : IRType
-MP_LIMB_T = I64
-
 isReturn : Reg -> Bool
 isReturn RVal = True
 isReturn _ = False
@@ -67,93 +62,6 @@ unboxBits64 bits64Obj = getObjectSlot bits64Obj 0
 
 unboxDouble : IRValue IRObjPtr -> Codegen (IRValue F64)
 unboxDouble doubleObj = getObjectSlot doubleObj 0
-
-data CompareOp = LT | LTE | EQ | GTE | GT
-
-stringCompare : CompareOp -> Reg -> Reg -> Codegen (IRValue IRObjPtr)
-stringCompare op r1 r2 = do
-  o1 <- load (reg2val r1)
-  o2 <- load (reg2val r2)
-  h1 <- getObjectHeader o1
-  h2 <- getObjectHeader o2
-  l1 <- mkBinOp "and" (ConstI64 0xffffffff) h1
-  l2 <- mkBinOp "and" (ConstI64 0xffffffff) h2
-
-  minLength <- mkMin l1 l2
-
-  lblSizeCompare <- genLabel "strcompare_size"
-  lblCmpStart <- genLabel "strcompare_start"
-  lblPrefixEq <- genLabel "strcompare_prefix_eq"
-  lblPrefixNotEq <- genLabel "strcompare_prefix_neq"
-  lblEnd <- genLabel "strcompare_end"
-
-  jump lblSizeCompare
-  beginLabel lblSizeCompare
-  lengthsEqual <- icmp "eq" l1 l2
-
-  let startCommand = case op of
-                          EQ => (branch lengthsEqual lblCmpStart lblEnd)
-                          _ => (branch (Const I1 1) lblCmpStart lblEnd)
-
-  startCommand
-  beginLabel lblCmpStart
-
-  str1 <- getObjectPayloadAddr {t=I8} o1
-  str2 <- getObjectPayloadAddr {t=I8} o2
-  cmpResult32 <- call {t=I32} "fastcc" "@rapid.memcmp" [toIR str1, toIR str2, toIR minLength]
-  cmpResult <- mkSext cmpResult32
-  cmpResultIsEq <- icmp "eq" cmpResult (ConstI64 0)
-  branch cmpResultIsEq lblPrefixEq lblPrefixNotEq
-
-  beginLabel lblPrefixEq
-  string1Shorter <- icmp "slt" l1 l2
-  string1ShorterOrEqual <- icmp "sle" l1 l2
-  string2Shorter <- icmp "slt" l2 l1
-  string2ShorterOrEqual <- icmp "sle" l2 l1
-  let result : IRValue I1
-      result =  case op of
-                     LT  => string1Shorter
-                     LTE => string1ShorterOrEqual
-                     EQ  => lengthsEqual
-                     GTE => string2ShorterOrEqual
-                     GT  => string2Shorter
-  jump lblEnd
-
-  beginLabel lblPrefixNotEq
-  cmpResultIsLt <- icmp "slt" cmpResult (Const I64 0)
-  cmpResultIsGt <- icmp "sgt" cmpResult (Const I64 0)
-  let result2 =  case op of
-                      LT  => cmpResultIsLt
-                      LTE => cmpResultIsLt
-                      EQ  => Const I1 0
-                      GT  => cmpResultIsGt
-                      GTE => cmpResultIsGt
-  jump lblEnd
-  beginLabel lblEnd
-
-  finalResult <- phi [(result, lblPrefixEq), (result2, lblPrefixNotEq), (Const I1 0, lblSizeCompare)]
-  cgMkInt !(mkZext finalResult)
-
-mkSubstring : IRValue IRObjPtr -> IRValue I64 -> IRValue I64 -> Codegen (IRValue IRObjPtr)
-mkSubstring strObj startIndexRaw length = do
-  length32 <- mkTrunc {to=I32} !(mkMax length (Const I64 0))
-  strLenBytes <- getStringByteLength strObj
-
-  startIndex <- mkTrunc {to=I32} !(mkMax startIndexRaw (Const I64 0))
-  strPayloadStart <- getObjectPayloadAddr {t=I8} strObj
-
-  startOffset <- call {t=I32} "ccc" "@utf8_codepoints_bytelen" [toIR strPayloadStart, toIR startIndex, toIR strLenBytes]
-  startAddr <- getElementPtr strPayloadStart startOffset
-  maxLengthBytes <- mkMax !(mkSub strLenBytes startOffset) (Const I32 0)
-  resultLength <- call {t=I32} "ccc" "@utf8_codepoints_bytelen" [toIR startAddr, toIR length32, toIR maxLengthBytes]
-
-  newStr <- dynamicAllocate !(mkZext resultLength)
-  newHeader <- mkHeader OBJECT_TYPE_ID_STR resultLength
-  putObjectHeader newStr newHeader
-  newStrPayload <- getObjectPayloadAddr {t=I8} newStr
-
-  voidCall "ccc" "@llvm.memcpy.p1i8.p1i8.i64" [toIR newStrPayload, toIR startAddr, toIR !(mkZext {to=I64} resultLength), toIR (Const I1 0)]
-  pure newStr
 
 unboxInt : IRValue (Pointer 0 IRObjPtr) -> Codegen (IRValue I64)
 unboxInt src = unboxInt' !(load src)
@@ -260,27 +168,6 @@ findConstCaseType ((Str _,_)::_) = pure StringCase
 findConstCaseType ((Ch _,_)::_) = pure CharCase
 findConstCaseType ((c,_)::_) = Left $ "unknown const case type: " ++ (showConstant c)
 
-compareStr : IRValue IRObjPtr -> IRValue IRObjPtr -> Codegen (IRValue I1)
-compareStr obj1 obj2 = do
-  lblStart <- genLabel "strcompare_hdr"
-  lblEnd <- genLabel "strcompare_end"
-  lblCompareContents <- genLabel "strcompare_content"
-  appendCode $ "br " ++ toIR lblStart
-  beginLabel lblStart
-  h1 <- getObjectHeader obj1
-  h2 <- getObjectHeader obj2
-  headersEqual <- icmp "eq" h1 h2
-  appendCode $ "br " ++ toIR headersEqual ++ ", " ++ toIR lblCompareContents ++ ", " ++ toIR lblEnd
-  beginLabel lblCompareContents
-  str1 <- getObjectPayloadAddr {t=I8} obj1
-  str2 <- getObjectPayloadAddr {t=I8} obj2
-  length <- mkAnd h1 (ConstI64 0xffffffff)
-  contentsEqual <- (SSA I1) <$> assignSSA ("call fastcc i1 @mem_eq(" ++ (showSep ", " ([toIR str1, toIR str2, toIR length])) ++ ")")
-  appendCode $ "br " ++ toIR lblEnd
-  beginLabel lblEnd
-  phi [(headersEqual, lblStart), (contentsEqual, lblCompareContents)]
-  --(SSA I1) <$> assignSSA ("phi i1 [ " ++ showWithoutType headersEqual ++ ", " ++ showWithoutType lblStart ++ " ], [ " ++ showWithoutType contentsEqual ++ ", " ++ showWithoutType lblCompareContents ++ " ]")
-
 unboxChar : IRValue (Pointer 0 IRObjPtr) -> Codegen (IRValue I32)
 unboxChar objPtr = do
   hdr <- getObjectHeader !(load objPtr)
@@ -340,7 +227,7 @@ getInstForConstCaseString r alts def =
       let labelAltStart = MkLabel (caseId ++ "_alt_" ++ show idx)
       let labelAltNext = MkLabel (caseId ++ "_next" ++ show idx)
       compStr <- mkStr s
-      match <- compareStr compStr scrutinee
+      match <- stringEqual compStr scrutinee
       appendCode $ "br " ++ toIR match ++ ", " ++ toIR labelAltStart ++ ", " ++ toIR labelAltNext
       -- compare s == scrut
       beginLabel labelAltStart
@@ -556,6 +443,7 @@ genericCast fromType DoubleType src = do
 genericCast DoubleType toType src = genericCastFromDouble toType src
 
 -- to String
+genericCast IntegerType StringType src = castIntegerToString src
 genericCast fromType StringType src =
   case (intKind fromType) of
        Just _ => do
@@ -639,6 +527,13 @@ integerCmp op dest a b = do
   obj <- cgMkInt !(mkZext {to=I64} cmpResult)
   store obj (reg2val dest)
 
+stringCmp : CompareOp -> Reg -> Reg -> Reg -> Codegen ()
+stringCmp op dest r1 r2 = do
+  o1 <- load (reg2val r1)
+  o2 <- load (reg2val r2)
+  result <- stringCompare op o1 o2
+  store result (reg2val dest)
+
 doubleCmp : String -> Reg -> Reg -> Reg -> Codegen ()
 doubleCmp op dest a b = do
   f1 <- unboxDouble !(load $ reg2val a)
@@ -676,51 +571,12 @@ getInstIR (OP r BelieveMe [_, _, v]) = do
 getInstIR (OP r StrHead [r1]) = do
   assertObjectType r1 OBJECT_TYPE_ID_STR
   o1 <- load (reg2val r1)
-  strLength <- getStringByteLength o1
-  strIsZero <- unlikely !(icmp "eq" (Const I32 0) strLength)
-  strHeadOk <- genLabel "strhead_ok"
-  strHeadError <- genLabel "strhead_err"
-  strHeadFinished <- genLabel "strhead_finished"
-
-  branch strIsZero strHeadError strHeadOk
-  beginLabel strHeadOk
-  payload <- getObjectPayloadAddr {t=I8} o1
-
-  firstChar <- call {t=I32} "ccc" "@utf8_decode1" [toIR payload]
-
-  newCharObj <- cgMkChar firstChar
-
-  store newCharObj (reg2val r)
-  jump strHeadFinished
-
-  beginLabel strHeadError
-  appendCode $ "call ccc void @idris_rts_crash(i64 1) noreturn"
-  appendCode $ "unreachable"
-
-  beginLabel strHeadFinished
+  store !(stringHead o1) (reg2val r)
 
 getInstIR (OP r StrTail [r1]) = do
   assertObjectType r1 OBJECT_TYPE_ID_STR
   o1 <- load (reg2val r1)
-  strLength <- getStringLength o1
-  strIsZero <- unlikely !(icmp "eq" strLength (Const I32 0))
-  strTailOk <- genLabel "strtail_ok"
-  strTailError <- genLabel "strtail_err"
-  strTailFinished <- genLabel "strtail_finished"
-
-  branch strIsZero strTailError strTailOk
-  beginLabel strTailOk
-
-  subStr <- mkSubstring o1 (Const I64 1) !(mkSub !(mkZext strLength) (Const I64 1))
-
-  store subStr (reg2val r)
-  jump strTailFinished
-
-  beginLabel strTailError
-  appendCode $ "call ccc void @idris_rts_crash(i64 17) noreturn"
-  appendCode $ "unreachable"
-
-  beginLabel strTailFinished
+  store !(stringTail o1) (reg2val r)
 
 getInstIR (OP r StrSubstr [r1, r2, r3]) = do
   assertObjectType r1 OBJECT_TYPE_ID_INT
@@ -737,74 +593,25 @@ getInstIR (OP r StrAppend [r1, r2]) = do
   assertObjectType r2 OBJECT_TYPE_ID_STR
   o1 <- load (reg2val r1)
   o2 <- load (reg2val r2)
-  h1 <- getObjectHeader o1
-  h2 <- getObjectHeader o2
-  l1 <- mkBinOp "and" (ConstI64 0xffffffff) h1
-  l2 <- mkBinOp "and" (ConstI64 0xffffffff) h2
-  newLength <- mkAddNoWrap l1 l2
-  newStr <- dynamicAllocate newLength
-  newHeader <- mkHeader OBJECT_TYPE_ID_STR !(mkTrunc newLength)
-
-  str1 <- getObjectPayloadAddr {t=I8} o1
-  str2 <- getObjectPayloadAddr {t=I8} o2
-
-  newStrPayload1 <- getObjectPayloadAddr {t=I8} newStr
-  newStrPayload2 <- getElementPtr newStrPayload1 l1
-
-  appendCode $ "  call void @llvm.memcpy.p1i8.p1i8.i64(" ++ toIR newStrPayload1 ++ ", " ++ toIR str1 ++ ", " ++ toIR l1 ++ ", i1 false)"
-  appendCode $ "  call void @llvm.memcpy.p1i8.p1i8.i64(" ++ toIR newStrPayload2 ++ ", " ++ toIR str2 ++ ", " ++ toIR l2 ++ ", i1 false)"
-
-  putObjectHeader newStr newHeader
-
+  newStr <- stringAppend o1 o2
   store newStr (reg2val r)
 
 getInstIR (OP r StrReverse [r1]) = do
   assertObjectType r1 OBJECT_TYPE_ID_STR
   strObj <- load (reg2val r1)
-  hdr <- getObjectHeader strObj
-  length <- mkBinOp "and" (ConstI64 0xffffffff) hdr
-  newStr <- dynamicAllocate length
-  newHeader <- mkHeader OBJECT_TYPE_ID_STR !(mkTrunc length)
-
-  origPayload <- getObjectPayloadAddr {t=I8} strObj
-  newStrPayload <- getObjectPayloadAddr {t=I8} newStr
-
-  appendCode $ "  call ccc void @rapid_strreverse(" ++ toIR newStrPayload ++ ", " ++ toIR origPayload ++ ", " ++ toIR length ++ ")"
-
-  putObjectHeader newStr newHeader
-
-  store newStr (reg2val r)
+  store !(stringReverse strObj) (reg2val r)
 
 getInstIR (OP r StrCons [r1, r2]) = do
   assertObjectType r1 OBJECT_TYPE_ID_CHAR
   assertObjectType r2 OBJECT_TYPE_ID_STR
   o1 <- load (reg2val r1)
   o2 <- load (reg2val r2)
-  charVal32 <- unboxChar' o1
-  l32 <- getStringByteLength o2
-  -- maximum length of one codepoint in UTF-8 is 4 bytes
-  newLength <- mkAddNoWrap (Const I32 4) l32
-  newStr <- dynamicAllocate !(mkZext newLength)
-  putObjectHeader newStr !(mkHeader OBJECT_TYPE_ID_STR newLength)
-
-  str2 <- getObjectPayloadAddr {t=I8} o2
-
-  newStrPayload1 <- getObjectPayloadAddr {t=I8} newStr
-
-  charLength <- call {t=I32} "ccc" "@utf8_encode1" [toIR newStrPayload1, toIR charVal32]
-
-  newStrPayload2 <- getElementPtr newStrPayload1 charLength
-  appendCode $ "  call void @llvm.memcpy.p1i8.p1i8.i64(" ++ toIR newStrPayload2 ++ ", " ++ toIR str2 ++ ", " ++ toIR !(mkZext {to=I64} l32) ++ ", i1 false)"
-  realNewLength <- mkAddNoWrap charLength l32
-  putObjectHeader newStr !(mkHeader OBJECT_TYPE_ID_STR realNewLength)
-
-  store newStr (reg2val r)
+  store !(stringCons o1 o2) (reg2val r)
 
 getInstIR (OP r StrLength [r1]) = do
   assertObjectType r1 OBJECT_TYPE_ID_STR
   strObj <- load (reg2val r1)
   codepointCount <- getStringLength strObj
-
   sizeIntObj <- cgMkInt !(mkZext codepointCount)
   store sizeIntObj (reg2val r)
 getInstIR (OP r StrIndex [r1, r2]) = do
@@ -822,41 +629,11 @@ getInstIR (OP r StrIndex [r1, r2]) = do
   newCharObj <- cgMkChar charVal
   store newCharObj (reg2val r)
 
-getInstIR (OP r (LT  StringType) [r1, r2]) = store !(stringCompare LT  r1 r2) (reg2val r)
-getInstIR (OP r (LTE StringType) [r1, r2]) = store !(stringCompare LTE r1 r2) (reg2val r)
-getInstIR (OP r (EQ  StringType) [r1, r2]) = store !(stringCompare EQ  r1 r2) (reg2val r)
-getInstIR (OP r (GTE StringType) [r1, r2]) = store !(stringCompare GTE r1 r2) (reg2val r)
-getInstIR (OP r (GT  StringType) [r1, r2]) = store !(stringCompare GT  r1 r2) (reg2val r)
-
-getInstIR (OP r (Cast IntegerType StringType) [r1]) = do
-  i1 <- load (reg2val r1)
-  s1 <- getObjectSize i1
-  u1 <- mkZext {to=I64} !(mkAbs s1)
-
-  isZero <- icmp "eq" s1 (Const I32 0)
-
-  mkIf_ (pure isZero) (do
-      newStr <- mkStr "0"
-      store newStr (reg2val r)
-    ) (do
-      maxDigits <- call {t=TARGET_SIZE_T} "ccc" "@__gmpn_sizeinbase" [toIR !(getObjectPayloadAddr {t=MP_LIMB_T} i1), toIR u1, "i32 10"]
-      isNegative <- icmp "slt" s1 (Const I32 0)
-
-      -- we need to add one extra byte of "scratch space" for mpn_get_str
-      -- if the number is negative we need one character more for the leading minus
-      needsSign <- mkSelect isNegative (Const I64 2) (Const I64 1)
-      maxDigitsWithSign <- mkAdd maxDigits needsSign
-
-      newStr <- dynamicAllocate maxDigitsWithSign
-      newHeader <- mkHeader OBJECT_TYPE_ID_STR !(mkTrunc maxDigitsWithSign)
-      putObjectHeader newStr newHeader
-
-      actualDigits <- call {t=I64} "ccc" "@rapid_bigint_get_str" [toIR newStr, toIR i1, "i32 10"]
-      actualLengthHeader <- mkHeader OBJECT_TYPE_ID_STR !(mkTrunc actualDigits)
-      putObjectHeader newStr actualLengthHeader
-
-      store newStr (reg2val r)
-    )
+getInstIR (OP r (LT  StringType) [r1, r2]) = stringCmp LT  r r1 r2
+getInstIR (OP r (LTE StringType) [r1, r2]) = stringCmp LTE r r1 r2
+getInstIR (OP r (EQ  StringType) [r1, r2]) = stringCmp EQ  r r1 r2
+getInstIR (OP r (GTE StringType) [r1, r2]) = stringCmp GTE r r1 r2
+getInstIR (OP r (GT  StringType) [r1, r2]) = stringCmp GT  r r1 r2
 
 getInstIR (OP r (Cast Bits64Type StringType) [r1]) = do
   obj <- load (reg2val r1)

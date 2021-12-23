@@ -17,6 +17,7 @@ add_idris_package(rapid-lite rapid-lite.ipkg
   src/Compiler/LLVM/Rapid/Foreign.idr
   src/Compiler/LLVM/Rapid/Integer.idr
   src/Compiler/LLVM/Rapid/Object.idr
+  src/Compiler/LLVM/Rapid/String.idr
   src/Compiler/Optimize.idr
   src/Compiler/PrepareCode.idr
   src/Compiler/VMCodeSexp.idr
@@ -40,6 +41,7 @@ add_idris_package(rapidc rapidc.ipkg
   src/Compiler/LLVM/Rapid/Foreign.idr
   src/Compiler/LLVM/Rapid/Integer.idr
   src/Compiler/LLVM/Rapid/Object.idr
+  src/Compiler/LLVM/Rapid/String.idr
   src/Compiler/PrepareCode.idr
   src/Compiler/VMCodeSexp.idr
   src/Control/Codegen.idr

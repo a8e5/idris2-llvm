@@ -26,6 +26,12 @@ GMP_LIMB_BOUND = (1 `prim__shl_Integer` (GMP_LIMB_BITS))
 GMP_ESTIMATE_DIGITS_PER_LIMB : Integer
 GMP_ESTIMATE_DIGITS_PER_LIMB = 19
 
+TARGET_SIZE_T : IRType
+TARGET_SIZE_T = I64
+
+MP_LIMB_T : IRType
+MP_LIMB_T = I64
+
 twosComplement : Num a => Bits a => a -> a
 twosComplement x = 1 + (complement x)
 
@@ -673,3 +679,31 @@ castStringToInteger strObj = do
     toIR strObj
     ]
   pure newObj
+
+export
+castIntegerToString : IRValue IRObjPtr -> Codegen (IRValue IRObjPtr)
+castIntegerToString i1 = do
+  s1 <- getObjectSize i1
+  u1 <- mkZext {to=I64} !(mkAbs s1)
+
+  isZero <- icmp "eq" s1 (Const I32 0)
+
+  mkIf (pure isZero) (mkStr "0") (do
+      maxDigits <- call {t=TARGET_SIZE_T} "ccc" "@__gmpn_sizeinbase" [toIR !(getObjectPayloadAddr {t=MP_LIMB_T} i1), toIR u1, "i32 10"]
+      isNegative <- icmp "slt" s1 (Const I32 0)
+
+      -- we need to add one extra byte of "scratch space" for mpn_get_str
+      -- if the number is negative we need one character more for the leading minus
+      needsSign <- mkSelect isNegative (Const I64 2) (Const I64 1)
+      maxDigitsWithSign <- mkAdd maxDigits needsSign
+
+      newStr <- dynamicAllocate maxDigitsWithSign
+      newHeader <- mkHeader OBJECT_TYPE_ID_STR !(mkTrunc maxDigitsWithSign)
+      putObjectHeader newStr newHeader
+
+      actualDigits <- call {t=I64} "ccc" "@rapid_bigint_get_str" [toIR newStr, toIR i1, "i32 10"]
+      actualLengthHeader <- mkHeader OBJECT_TYPE_ID_STR !(mkTrunc actualDigits)
+      putObjectHeader newStr actualLengthHeader
+
+      pure newStr
+    )
