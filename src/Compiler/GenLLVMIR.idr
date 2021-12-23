@@ -227,8 +227,8 @@ mkSubstring strObj startIndexRaw length = do
   voidCall "ccc" "@llvm.memcpy.p1i8.p1i8.i64" [toIR newStrPayload, toIR startAddr, toIR !(mkZext {to=I64} resultLength), toIR (Const I1 0)]
   pure newStr
 
-mkRuntimeCrash : Int -> String -> Codegen ()
-mkRuntimeCrash i s = do
+mkRuntimeCrash : String -> Codegen ()
+mkRuntimeCrash s = do
   msg <- mkStr s
   appendCode $ "  call ccc void @idris_rts_crash_msg(" ++ toIR msg ++ ") noreturn"
   appendCode $ "unreachable"
@@ -242,7 +242,7 @@ unboxIntSigned' 16 src = mkSext =<< (mkTrunc {to=I16} =<< unboxInt' src)
 unboxIntSigned' 32 src = mkSext =<< (mkTrunc {to=I32} =<< unboxInt' src)
 unboxIntSigned' bits _ = do
   addError ("not a small int kind: " ++ show bits ++ " bits")
-  mkRuntimeCrash 12345 ("not a small int kind: " ++ show bits ++ " bits")
+  mkRuntimeCrash ("not a small int kind: " ++ show bits ++ " bits")
   pure (Const I64 0)
 
 unboxIntSigned : Int -> IRValue (Pointer 0 IRObjPtr) -> Codegen (IRValue I64)
@@ -327,15 +327,13 @@ makeCaseLabel {conNames} caseId (Right n,_) =
 instrAsComment : VMInst -> String
 instrAsComment i = ";" ++ (unwords $ lines $ show i)
 
-prepareArg : Reg -> Codegen String
+prepareArg : Reg -> Codegen (IRValue IRObjPtr)
 prepareArg Discard = do
-  pure ("%ObjPtr null")
-prepareArg (Loc i) = do
-  tmp <- assignSSA $ "load %ObjPtr, %ObjPtr* %v" ++ (show i) ++ "Var"
-  pure $ "%ObjPtr " ++ tmp
+  pure nullPtr
+prepareArg r@(Loc _) = load (reg2val r)
 prepareArg RVal = do
   addError "cannot use rval as call arg"
-  pure "error"
+  pure nullPtr
 
 data ConstCaseType = IntLikeCase Constant | BigIntCase | StringCase | CharCase
 
@@ -1049,7 +1047,7 @@ divInteger constI i1 i2 = do
   zero1 <- icmp "eq" s1 (Const I32 0)
   zero2 <- icmp "eq" s2 (Const I32 0)
   ignore $ mkIf (pure zero2) (do
-                mkRuntimeCrash constI "division by 0"
+                mkRuntimeCrash "division by 0"
                 pure (Const I1 0)
                 ) (pure (Const I1 0))
 
@@ -1133,7 +1131,7 @@ getInstIR i (OP r Crash [r1, r2]) = do
   msg <- load (reg2val r2)
   appendCode $ "  call ccc void @idris_rts_crash_msg(" ++ toIR msg ++ ") noreturn"
   appendCode $ "unreachable"
-getInstIR i (ERROR s) = mkRuntimeCrash i s
+getInstIR i (ERROR s) = mkRuntimeCrash s
 getInstIR i (OP r BelieveMe [_, _, v]) = do
   store !(load (reg2val v)) (reg2val r)
 
@@ -1821,12 +1819,12 @@ getInstIR i (OP r (GTE ty) [r1, r2]) = intCompare' (intKind ty) "uge" "sge" r r1
 getInstIR i (OP r (GT  ty) [r1, r2]) = intCompare' (intKind ty) "ugt" "sgt" r r1 r2
 
 getInstIR i (MKCON r (Left tag) args) = do
-  obj <- mkCon tag !(traverse (load . reg2val) args)
+  obj <- mkCon tag !(traverse prepareArg args)
   store obj (reg2val r)
 getInstIR {conNames} i (MKCON r (Right n) args) = do
   case lookup n conNames of
        Just nameId => do
-         loadedArgs <- traverse (load . reg2val) args
+         loadedArgs <- traverse prepareArg args
          obj <- mkCon (makeNameId nameId) loadedArgs
          store obj (reg2val r)
        Nothing => addError $ "MKCON name not found: " ++ show n
@@ -1967,7 +1965,7 @@ getInstIR i (CALL r tailpos n args) =
      let base = "%TSOPtr %BaseArg"
 
      let tailStr = if tailpos then "tail " else ""
-     result <- assignSSA $ tailStr ++ "call fastcc %Return1 @" ++ (safeName n) ++ "(" ++ showSep ", " (hp::base::hpLim::argsV) ++ ")"
+     result <- assignSSA $ tailStr ++ "call fastcc %Return1 @" ++ (safeName n) ++ "(" ++ showSep ", " (hp::base::hpLim::(map toIR argsV)) ++ ")"
 
      when tailpos $ appendCode $ "ret %Return1 " ++ result
      when tailpos $ appendCode $ "unreachable"
@@ -1987,102 +1985,15 @@ getInstIR i (PROJECT r o pos) = do
   assertObjectTypeAny slot 0xf0
   store slot (reg2val r)
 
-getInstIR i (EXTPRIM r n args) = compileExtPrim i n r args
+getInstIR i (EXTPRIM r n args) = do
+  loadedArgs <- traverse prepareArg args
+  result <- compileExtPrim n loadedArgs
+  store result (reg2val r)
 
 getInstIR i START = pure ()
 getInstIR i inst = do
   addError $ "NOT IMPLEMENTED: " ++ show inst
-  mkRuntimeCrash i ("NOT IMPLEMENTED: " ++ show inst)
-
-compileExtPrimFallback : Name -> Reg -> List Reg -> Codegen ()
-compileExtPrimFallback n r args =
-  do argsV <- traverse prepareArg args
-     hp <- ((++) "%RuntimePtr ") <$> assignSSA "load %RuntimePtr, %RuntimePtr* %HpVar"
-     hpLim <- ((++) "%RuntimePtr ") <$> assignSSA "load %RuntimePtr, %RuntimePtr* %HpLimVar"
-     let base = "%TSOPtr %BaseArg"
-     result <- assignSSA $ "call fastcc %Return1 @_extprim_" ++ (safeName n) ++ "(" ++ showSep ", " (hp::base::hpLim::argsV) ++ ")"
-
-     newHp <- assignSSA $ "extractvalue %Return1 " ++ result ++ ", 0"
-     appendCode $ "store %RuntimePtr " ++ newHp ++ ", %RuntimePtr* %HpVar"
-     newHpLim <- assignSSA $ "extractvalue %Return1 " ++ result ++ ", 1"
-     appendCode $ "store %RuntimePtr " ++ newHpLim ++ ", %RuntimePtr* %HpLimVar"
-     returnValue <- SSA IRObjPtr <$> assignSSA ("extractvalue %Return1 " ++ result ++ ", 2")
-     store returnValue (reg2val r)
-
-compileExtPrim : Int -> Name -> Reg -> List Reg -> Codegen ()
-compileExtPrim i (NS ns n) r args with (unsafeUnfoldNamespace ns)
-  compileExtPrim i (NS ns (UN $ Basic "prim__newArray")) r [_, countReg, elemReg, _] | ["Prims", "IOArray", "Data"] = do
-    lblStart <- genLabel "new_array_init_start"
-    lblLoop <- genLabel "new_array_init_loop"
-    lblEnd <- genLabel "new_array_init_end"
-    count <- unboxInt (reg2val countReg)
-    elem <- load (reg2val elemReg)
-    size <- mkMul (Const I64 8) count
-    newObj <- dynamicAllocate size
-    hdr <- mkHeader OBJECT_TYPE_ID_IOARRAY !(mkTrunc count)
-    putObjectHeader newObj hdr
-    jump lblStart
-    beginLabel lblStart
-
-    jump lblLoop
-    beginLabel lblLoop
-    iPlus1name <- mkVarName "%iplus1."
-    let iPlus1 = SSA I64 iPlus1name
-    i <- phi [(Const I64 0, lblStart), (iPlus1, lblLoop)]
-
-    addr <- getObjectSlotAddrVar newObj i
-    store elem addr
-
-    appendCode $ iPlus1name ++ " = add " ++ toIR i ++ ", 1"
-    continue <- icmp "ult" iPlus1 count
-    branch continue lblLoop lblEnd
-    beginLabel lblEnd
-    store newObj (reg2val r)
-
-  compileExtPrim i (NS ns (UN $ Basic "prim__arrayGet")) r [_, arrReg, indexReg, _] | ["Prims", "IOArray", "Data"] = do
-    index <- unboxInt (reg2val indexReg)
-    array <- load (reg2val arrReg)
-
-    addr <- getObjectSlotAddrVar array index
-    val <- load addr
-
-    store val (reg2val r)
-
-  compileExtPrim i (NS ns (UN $ Basic "prim__arraySet")) r [_, arrReg, indexReg, valReg, _] | ["Prims", "IOArray", "Data"] = do
-    index <- unboxInt (reg2val indexReg)
-    array <- load (reg2val arrReg)
-    val <- load (reg2val valReg)
-
-    addr <- getObjectSlotAddrVar array index
-    store val addr
-
-  compileExtPrim i (NS ns (UN $ Basic "prim__codegen")) r [] | ["Info", "System"] = do
-    store !(mkStr "rapid") (reg2val r)
-  compileExtPrim i (NS ns (UN $ Basic "prim__os")) r [] | ["Info", "System"] = do
-    -- no cross compiling for now:
-    store !(mkStr System.Info.os) (reg2val r)
-  compileExtPrim i (NS ns (UN $ Basic "void")) r _ | ["Uninhabited", "Prelude"] = do
-    appendCode $ "  call ccc void @rapid_crash(i8* bitcast ([23 x i8]* @error_msg_void to i8*)) noreturn"
-    appendCode $ "unreachable"
-  compileExtPrim i (NS ns (UN $ Basic "prim__void")) r _ | ["Uninhabited", "Prelude"] = do
-    appendCode $ "  call ccc void @rapid_crash(i8* bitcast ([23 x i8]* @error_msg_void to i8*)) noreturn"
-    appendCode $ "unreachable"
-  compileExtPrim i (NS ns (UN $ Basic "prim__newIORef")) r [_, val, _] | ["IORef", "Data"] = do
-    ioRefObj <- dynamicAllocate (Const I64 8)
-    putObjectHeader ioRefObj !(mkHeader OBJECT_TYPE_ID_IOREF (Const I32 0))
-    putObjectSlot ioRefObj (Const I64 0) !(load $ reg2val val)
-    store ioRefObj (reg2val r)
-  compileExtPrim i (NS ns (UN $ Basic "prim__readIORef")) r [_, ioRefArg, _] | ["IORef", "Data"] = do
-    ioRefObj <- load $ reg2val ioRefArg
-    payload <- getObjectSlot ioRefObj 0
-    store payload (reg2val r)
-  compileExtPrim i (NS ns (UN $ Basic "prim__writeIORef")) r [_, ioRefArg, payloadArg, _] | ["IORef", "Data"] = do
-    ioRefObj <- load $ reg2val ioRefArg
-    payload <- load $ reg2val payloadArg
-    putObjectSlot ioRefObj (Const I64 0) payload
-    store !(mkUnit) (reg2val r)
-  compileExtPrim i (NS ns n) r args | _ = compileExtPrimFallback (NS ns n) r args
-compileExtPrim i n r args = compileExtPrimFallback n r args
+  mkRuntimeCrash ("NOT IMPLEMENTED: " ++ show inst)
 
 getInstIRWithComment : {auto conNames : SortedMap Name Int} -> Int -> VMInst -> Codegen ()
 getInstIRWithComment i instr = do
@@ -2137,141 +2048,6 @@ getFunIRClosureEntry conNames i n args body = do
         appendCode $ "  %v" ++ show i ++ "Var = alloca %ObjPtr"
         arg <- getObjectSlot clObj (index + 1)
         store arg (reg2val (Loc i))
-
-builtinForeign : (n : Nat ** (Vect n (IRValue IRObjPtr) -> Codegen ())) -> Name -> (argTypes : List CFType) -> CFType -> Codegen ()
-builtinForeign builtin name argTypes ret = do
-  let (n ** f) = builtin
-  appendCode ("define external fastcc %Return1 @" ++ safeName name ++ "(" ++ (showSep ", " $ prepareArgCallConv $ toList $ map toIR (args n)) ++ ") gc \"statepoint-example\" {")
-  funcEntry
-  f (args n)
-  funcReturn
-  appendCode "\n}\n"
-  where
-  args : (n : Nat) -> Vect n (IRValue IRObjPtr)
-  args n = map (\i => SSA IRObjPtr $ "%arg" ++ show (finToNat i)) range
-
-
-foreignRedirectMap : List (String, String)
-foreignRedirectMap = [
-    ("C:idris2_openFile, libidris2_support, idris_file.h", "rapid_system_file_open")
-  , ("C:fdopen,libc 6", "rapid_system_fdopen")
-  , ("C:idris2_closeFile, libidris2_support, idris_file.h", "rapid_system_file_close")
-  , ("C:fflush,libc 6", "rapid_system_file_flush")
-  , ("C:idris2_fileSize, libidris2_support, idris_file.h", "rapid_system_file_size")
-  , ("C:idris2_fileAccessTime, libidris2_support, idris_file.h", "rapid_system_file_atime")
-  , ("C:idris2_fileStatusTime, libidris2_support, idris_file.h", "rapid_system_file_ctime")
-  , ("C:idris2_fileModifiedTime, libidris2_support, idris_file.h", "rapid_system_file_mtime")
-  , ("C:idris2_readLine, libidris2_support, idris_file.h", "rapid_system_file_read_line")
-  , ("C:idris2_readChars, libidris2_support, idris_file.h", "rapid_system_file_read_chars")
-  , ("C:idris2_seekLine, libidris2_support, idris_file.h", "rapid_system_file_seek_line")
-  , ("C:fgetc,libc 6", "rapid_system_file_read_char")
-  , ("C:idris2_chmod, libidris2_support, idris_file.h", "rapid_system_file_chmod")
-  , ("C:getchar,libc 6", "rapid_system_getchar")
-  , ("C:putchar,libc 6", "rapid_system_putchar")
-  , ("C:idris2_getStr, libidris2_support, idris_support.h", "rapid_system_stdin_getline")
-  , ("C:idris2_writeLine, libidris2_support, idris_file.h", "rapid_system_file_write_string")
-  , ("C:idris2_eof, libidris2_support, idris_file.h", "rapid_system_file_eof")
-  , ("C:idris2_removeFile, libidris2_support, idris_file.h", "rapid_system_file_remove")
-  , ("C:idris2_fileError, libidris2_support, idris_file.h", "rapid_system_file_error")
-  , ("C:idris2_fileErrno, libidris2_support, idris_file.h", "rapid_system_errno")
-  , ("C:idris2_getErrno, libidris2_support, idris_support.h", "rapid_system_errno")
-  , ("C:idris2_stdin, libidris2_support, idris_file.h", "rapid_system_file_stdin")
-  , ("C:idris2_stdout, libidris2_support, idris_file.h", "rapid_system_file_stdout")
-  , ("C:idris2_stderr, libidris2_support, idris_file.h", "rapid_system_file_stderr")
-  , ("C:idris2_currentDirectory, libidris2_support, idris_directory.h", "rapid_system_current_dir")
-  , ("C:idris2_createDir, libidris2_support, idris_directory.h", "rapid_system_dir_create")
-  , ("C:idris2_changeDir, libidris2_support, idris_directory.h", "rapid_system_dir_change")
-  , ("C:idris2_removeDir, libidris2_support, idris_directory.h", "rapid_system_dir_remove")
-  , ("C:idris2_openDir, libidris2_support, idris_directory.h", "rapid_system_dir_open")
-  , ("C:idris2_closeDir, libidris2_support, idris_directory.h", "rapid_system_dir_close")
-  , ("C:idris2_nextDirEntry, libidris2_support, idris_directory.h", "rapid_system_dir_next_entry")
-  , ("C:idris2_popen, libidris2_support, idris_file.h", "rapid_system_popen")
-  , ("C:idris2_pclose, libidris2_support, idris_file.h", "rapid_system_pclose")
-  , ("C:idris2_free, libidris2_support, idris_memory.h", "rapid_system_free")
-  , ("C:idris2_putStr, libidris2_support, idris_support.h", "rapid_putstr")
-  , ("C:idris2_readBufferData, libidris2_support, idris_file.h", "idris_rts_read_buffer_data")
-  , ("C:idris2_writeBufferData, libidris2_support, idris_file.h", "idris_rts_write_buffer_data")
-  , ("C:idris2_isNull, libidris2_support, idris_support.h", "prim/isNull")
-  , ("C:idris2_fileErrno, libidris2_suppor, idris_support.h", "rapid_system_file_errno")
-  , ("C:idrnet_errno, libidris2_support, idris_net.h", "rapid_system_errno")
-  , ("C:idris2_strerror, libidris2_support, idris_support.h", "rapid_system_strerror")
-  , ("C:idris2_getString, libidris2_support, idris_support.h", "prim/getString")
-  , ("C:strlen,libc 6", "rapid_string_bytelength") -- <= remove, when Idris2 PR #1261 is merged
-
-  , ("C:idris2_setupTerm, libidris2_support, idris_term.h", "idris2_setupTerm")
-  , ("C:idris2_getTermCols, libidris2_support, idris_term.h", "idris2_getTermCols")
-  , ("C:idris2_getTermLines, libidris2_support, idris_term.h", "idris2_getTermLines")
-
-  , ("scheme:blodwen-stringbytelen", "rapid_string_bytelength")
-  , ("scheme:blodwen-string-iterator-new", "prim/blodwen-string-iterator-new")
-  , ("scheme:blodwen-string-iterator-next", "prim/blodwen-string-iterator-next")
-  , ("scheme:blodwen-string-iterator-to-string", "prim/blodwen-string-iterator-to-string")
-  , ("C:exit, libc 6", "rapid_system_exit")
-  , ("C:idris2_system, libidris2_support, idris_system.h", "rapid_system_system")
-  , ("C:getenv, libc 6", "rapid_system_get_env")
-  , ("scheme:blodwen-arg-count", "rapid_system_get_arg_count")
-  , ("scheme:blodwen-arg", "rapid_system_get_arg")
-
-  , ("C:idrnet_af_inet, libidris2_support, idris_net.h", "idrnet_af_inet")
-  , ("C:idrnet_af_inet6, libidris2_support, idris_net.h", "idrnet_af_inet6")
-  , ("C:idrnet_af_unix, libidris2_support, idris_net.h", "idrnet_af_unix")
-  , ("C:idrnet_af_unspec, libidris2_support, idris_net.h", "idrnet_af_unspec")
-  , ("C:idrnet_accept, libidris2_support, idris_net.h", "idrnet_accept")
-  , ("C:idrnet_bind, libidris2_support, idris_net.h", "idrnet_bind")
-  , ("C:idrnet_create_sockaddr, libidris2_support, idris_net.h", "idrnet_create_sockaddr")
-  , ("C:idrnet_free, libidris2_support, idris_net.h", "idrnet_free")
-  , ("C:idrnet_fdopen, libidris2_support, idris_net.h", "rapid_system_fdopen")
-  , ("C:idrnet_sockaddr_family, libidris2_support, idris_net.h", "idrnet_sockaddr_family")
-  , ("C:idrnet_sockaddr_ipv4, libidris2_support, idris_net.h", "idrnet_sockaddr_ipv4")
-  , ("C:idrnet_sockaddr_unix, libidris2_support, idris_net.h", "idrnet_sockaddr_unix")
-  , ("C:idrnet_socket, libidris2_support, idris_net.h", "idrnet_socket")
-  , ("C:idrnet_listen, libidris2_support, idris_net.h", "idrnet_listen")
-
-  , ("scheme:blodwen-buffer-size", "prim/blodwen-buffer-size")
-  , ("scheme:blodwen-new-buffer", "prim/blodwen-new-buffer")
-  , ("scheme:blodwen-buffer-free", "prim/noop2")
-  , ("scheme:blodwen-buffer-setbyte", "prim/blodwen-buffer-setbyte")
-  , ("scheme:blodwen-buffer-getbyte", "prim/blodwen-buffer-getbyte")
-  , ("scheme:blodwen-buffer-setbits16", "prim/blodwen-buffer-setbits16")
-  , ("scheme:blodwen-buffer-getbits16", "prim/blodwen-buffer-getbits16")
-  , ("scheme:blodwen-buffer-setbits32", "prim/blodwen-buffer-setbits32")
-  , ("scheme:blodwen-buffer-getbits32", "prim/blodwen-buffer-getbits32")
-  , ("scheme:blodwen-buffer-setbits64", "prim/blodwen-buffer-setbits64")
-  , ("scheme:blodwen-buffer-getbits64", "prim/blodwen-buffer-getbits64")
-  , ("scheme:blodwen-buffer-setint32", "prim/blodwen-buffer-setint32")
-  , ("scheme:blodwen-buffer-getint32", "prim/blodwen-buffer-getint32")
-  , ("scheme:blodwen-buffer-setint", "prim/blodwen-buffer-setint")
-  , ("scheme:blodwen-buffer-getint", "prim/blodwen-buffer-getint")
-  , ("scheme:blodwen-buffer-setdouble", "prim/blodwen-buffer-setdouble")
-  , ("scheme:blodwen-buffer-getdouble", "prim/blodwen-buffer-getdouble")
-  , ("scheme:blodwen-buffer-setstring", "prim/blodwen-buffer-setstring")
-  , ("scheme:blodwen-buffer-getstring", "prim/blodwen-buffer-getstring")
-  , ("scheme:blodwen-buffer-copydata", "prim/blodwen-buffer-copydata")
-
-  , ("scheme:blodwen-thread", "rapid_system_fork")
-
-  , ("scheme:blodwen-clock-time-utc", "prim/blodwen-clock-time-utc")
-  , ("scheme:blodwen-clock-time-monotonic", "prim/blodwen-clock-time-monotonic")
-  , ("scheme:blodwen-clock-time-duration", "prim/blodwen-clock-time-duration")
-  , ("scheme:blodwen-clock-time-process", "prim/blodwen-clock-time-process")
-  , ("scheme:blodwen-clock-time-thread", "prim/blodwen-clock-time-thread")
-  , ("scheme:blodwen-clock-time-gccpu", "prim/blodwen-clock-time-gccpu")
-  , ("scheme:blodwen-clock-time-gcreal", "prim/blodwen-clock-time-gcreal")
-
-  , ("scheme:blodwen-is-time?", "prim/blodwen-is-time")
-  , ("scheme:blodwen-clock-second", "prim/blodwen-clock-second")
-  , ("scheme:blodwen-clock-nanosecond", "prim/blodwen-clock-nanosecond")
-
-  , ("scheme:string-concat", "prim/string-concat")
-  , ("scheme:string-pack", "prim/string-pack")
-  , ("scheme:string-unpack", "prim/string-unpack")
-  ]
-
-findForeignName : List String -> Maybe String
-findForeignName cs =
-  case find (isPrefixOf "rapid:") cs of
-       Just found => Just (substr 6 99999 found)
-       Nothing => choiceMap (\n => lookup n foreignRedirectMap) cs
 
 getForeignFunctionIR : Int -> Name -> List String -> List CFType -> CFType -> Codegen ()
 getForeignFunctionIR i name cs args ret = do

@@ -1,7 +1,9 @@
 module Compiler.LLVM.Rapid.Builtin
 
 import Data.Vect
+import System.Info
 
+import Core.Name
 import Compiler.VMCode
 
 import Compiler.LLVM.IR
@@ -9,7 +11,11 @@ import Compiler.LLVM.Instruction
 import Compiler.LLVM.Rapid.Foreign
 import Compiler.LLVM.Rapid.Object
 import Control.Codegen
+import Data.Utils
 import Rapid.Common
+
+-- we provide our own in Data.Utils
+%hide Core.Name.Namespace.showSep
 
 -- TODO: in this file, reg2val is only ever used with RVal, refactor
 reg2val : Reg -> IRValue (Pointer 0 IRObjPtr)
@@ -443,3 +449,84 @@ builtinPrimitives = [
   , ("prim/noop2", (2 ** mk_prim__noop2))
   ]
 
+compileExtPrimFallback : Name -> List (IRValue IRObjPtr) -> Codegen (IRValue IRObjPtr)
+compileExtPrimFallback n args =
+  do hp <- ((++) "%RuntimePtr ") <$> assignSSA "load %RuntimePtr, %RuntimePtr* %HpVar"
+     hpLim <- ((++) "%RuntimePtr ") <$> assignSSA "load %RuntimePtr, %RuntimePtr* %HpLimVar"
+     let base = "%TSOPtr %BaseArg"
+     result <- assignSSA $ "call fastcc %Return1 @_extprim_" ++ (safeName n) ++ "(" ++ showSep ", " (hp::base::hpLim::(map toIR args)) ++ ")"
+
+     newHp <- assignSSA $ "extractvalue %Return1 " ++ result ++ ", 0"
+     appendCode $ "store %RuntimePtr " ++ newHp ++ ", %RuntimePtr* %HpVar"
+     newHpLim <- assignSSA $ "extractvalue %Return1 " ++ result ++ ", 1"
+     appendCode $ "store %RuntimePtr " ++ newHpLim ++ ", %RuntimePtr* %HpLimVar"
+     returnValue <- SSA IRObjPtr <$> assignSSA ("extractvalue %Return1 " ++ result ++ ", 2")
+     pure returnValue
+
+export
+compileExtPrim : Name -> List (IRValue IRObjPtr) -> Codegen (IRValue IRObjPtr)
+compileExtPrim (NS ns n) args with (unsafeUnfoldNamespace ns)
+  compileExtPrim (NS ns (UN $ Basic "prim__newArray")) [_, countArg, elemArg, _] | ["Prims", "IOArray", "Data"] = do
+    lblStart <- genLabel "new_array_init_start"
+    lblLoop <- genLabel "new_array_init_loop"
+    lblEnd <- genLabel "new_array_init_end"
+    count <- unboxInt' countArg
+    size <- mkMul (Const I64 8) count
+    newObj <- dynamicAllocate size
+    hdr <- mkHeader OBJECT_TYPE_ID_IOARRAY !(mkTrunc count)
+    putObjectHeader newObj hdr
+    jump lblStart
+    beginLabel lblStart
+
+    jump lblLoop
+    beginLabel lblLoop
+    iPlus1name <- mkVarName "%iplus1."
+    let iPlus1 = SSA I64 iPlus1name
+    i <- phi [(Const I64 0, lblStart), (iPlus1, lblLoop)]
+
+    addr <- getObjectSlotAddrVar newObj i
+    store elemArg addr
+
+    appendCode $ iPlus1name ++ " = add " ++ toIR i ++ ", 1"
+    continue <- icmp "ult" iPlus1 count
+    branch continue lblLoop lblEnd
+    beginLabel lblEnd
+    pure newObj
+
+  compileExtPrim (NS ns (UN $ Basic "prim__arrayGet")) [_, array, indexArg, _] | ["Prims", "IOArray", "Data"] = do
+    index <- unboxInt' indexArg
+    addr <- getObjectSlotAddrVar array index
+    load addr
+
+
+  compileExtPrim (NS ns (UN $ Basic "prim__arraySet")) [_, array, indexArg, val, _] | ["Prims", "IOArray", "Data"] = do
+    index <- unboxInt' indexArg
+    addr <- getObjectSlotAddrVar array index
+    store val addr
+    mkUnit
+
+  compileExtPrim (NS ns (UN $ Basic "prim__codegen")) [] | ["Info", "System"] = do
+    mkStr "rapid"
+  compileExtPrim (NS ns (UN $ Basic "prim__os")) [] | ["Info", "System"] = do
+    -- no cross compiling for now:
+    mkStr System.Info.os
+  compileExtPrim (NS ns (UN $ Basic "void")) _ | ["Uninhabited", "Prelude"] = do
+    appendCode $ "  call ccc void @rapid_crash(i8* bitcast ([23 x i8]* @error_msg_void to i8*)) noreturn"
+    appendCode $ "unreachable"
+    pure nullPtr
+  compileExtPrim (NS ns (UN $ Basic "prim__void")) _ | ["Uninhabited", "Prelude"] = do
+    appendCode $ "  call ccc void @rapid_crash(i8* bitcast ([23 x i8]* @error_msg_void to i8*)) noreturn"
+    appendCode $ "unreachable"
+    pure nullPtr
+  compileExtPrim (NS ns (UN $ Basic "prim__newIORef")) [_, val, _] | ["IORef", "Data"] = do
+    ioRefObj <- dynamicAllocate (Const I64 8)
+    putObjectHeader ioRefObj !(mkHeader OBJECT_TYPE_ID_IOREF (Const I32 0))
+    putObjectSlot ioRefObj (Const I64 0) val
+    pure ioRefObj
+  compileExtPrim (NS ns (UN $ Basic "prim__readIORef")) [_, ioRefObj, _] | ["IORef", "Data"] = do
+    getObjectSlot ioRefObj 0
+  compileExtPrim (NS ns (UN $ Basic "prim__writeIORef")) [_, ioRefObj, payload, _] | ["IORef", "Data"] = do
+    putObjectSlot ioRefObj (Const I64 0) payload
+    mkUnit
+  compileExtPrim (NS ns n) args | _ = compileExtPrimFallback (NS ns n) args
+compileExtPrim n args = compileExtPrimFallback n args
