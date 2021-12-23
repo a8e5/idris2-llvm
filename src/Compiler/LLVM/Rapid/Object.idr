@@ -140,3 +140,41 @@ dynamicAllocate payloadSize = do
   dynamicAllocateInto gc varName payloadSize
   pure $ SSA IRObjPtr varName
 
+TRACE : Bool
+TRACE = False
+
+export
+assertObjectTypeAny : IRValue IRObjPtr -> Integer -> Codegen ()
+assertObjectTypeAny o msg = when TRACE $ do
+  let tVal = (Const I64 (0x10000 + msg))
+  typeOk <- genLabel "typecheck_ok"
+  typeError <- genLabel "typecheck_error"
+  typeEnd <- genLabel "typecheck_end"
+
+  hdr <- getObjectHeader o
+  hdrTypFull <- mkShiftR hdr (Const I64 32)
+  hdrTyp <- mkAnd (Const I64 0xff) hdrTypFull
+  hdrTypOk <- icmp "ne" (Const I64 0) hdrTyp
+  branch hdrTypOk typeOk typeError
+  beginLabel typeError
+  appendCode $ "call ccc void @idris_rts_crash_typecheck(" ++ showSep ", " [toIR o, toIR tVal] ++ ") noreturn"
+  appendCode $ "unreachable"
+  beginLabel typeOk
+
+export
+assertObjectType' : IRValue IRObjPtr -> Int -> Codegen ()
+assertObjectType' o t = when TRACE $ do
+  let tVal = (Const I64 $ cast t)
+  typeOk <- genLabel "typecheck_ok"
+  typeError <- genLabel "typecheck_error"
+  typeEnd <- genLabel "typecheck_end"
+
+  hdr <- getObjectHeader o
+  hdrTypFull <- mkShiftR hdr (Const I64 32)
+  hdrTyp <- mkAnd (Const I64 0xff) hdrTypFull
+  hdrTypOk <- icmp "eq" tVal hdrTyp
+  branch hdrTypOk typeOk typeError
+  beginLabel typeError
+  appendCode $ "call ccc void @idris_rts_crash_typecheck(" ++ showSep ", " [toIR o, toIR tVal] ++ ") noreturn"
+  appendCode $ "unreachable"
+  beginLabel typeOk

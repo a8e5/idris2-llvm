@@ -618,45 +618,8 @@ unboxChar objPtr = do
   chVal32 <- mkTrunc {to=I32} chVal64
   pure chVal32
 
-TRACE : Bool
-TRACE = False
-
-assertObjectTypeAny : IRValue IRObjPtr -> Integer -> Codegen ()
-assertObjectTypeAny o msg = when TRACE $ do
-  let tVal = (Const I64 (0x10000 + msg))
-  typeOk <- genLabel "typecheck_ok"
-  typeError <- genLabel "typecheck_error"
-  typeEnd <- genLabel "typecheck_end"
-
-  hdr <- getObjectHeader o
-  hdrTypFull <- mkShiftR hdr (Const I64 32)
-  hdrTyp <- mkAnd (Const I64 0xff) hdrTypFull
-  hdrTypOk <- icmp "ne" (Const I64 0) hdrTyp
-  branch hdrTypOk typeOk typeError
-  beginLabel typeError
-  appendCode $ "call ccc void @idris_rts_crash_typecheck(" ++ showSep ", " [toIR o, toIR tVal] ++ ") noreturn"
-  appendCode $ "unreachable"
-  beginLabel typeOk
-
-assertObjectType' : IRValue IRObjPtr -> Int -> Codegen ()
-assertObjectType' o t = when TRACE $ do
-  let tVal = (Const I64 $ cast t)
-  typeOk <- genLabel "typecheck_ok"
-  typeError <- genLabel "typecheck_error"
-  typeEnd <- genLabel "typecheck_end"
-
-  hdr <- getObjectHeader o
-  hdrTypFull <- mkShiftR hdr (Const I64 32)
-  hdrTyp <- mkAnd (Const I64 0xff) hdrTypFull
-  hdrTypOk <- icmp "eq" tVal hdrTyp
-  branch hdrTypOk typeOk typeError
-  beginLabel typeError
-  appendCode $ "call ccc void @idris_rts_crash_typecheck(" ++ showSep ", " [toIR o, toIR tVal] ++ ") noreturn"
-  appendCode $ "unreachable"
-  beginLabel typeOk
-
 assertObjectType : Reg -> Int -> Codegen ()
-assertObjectType r t = when TRACE $ assertObjectType' !(load (reg2val r)) t
+assertObjectType r t = assertObjectType' !(load (reg2val r)) t
 
 mkCon : Int -> List Reg -> Codegen (IRValue IRObjPtr)
 mkCon tag args = do
