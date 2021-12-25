@@ -5,7 +5,6 @@ import Data.String
 import Data.Vect
 
 import Compiler.CompileExpr
-import Compiler.VMCode
 import Core.Name
 
 import Compiler.LLVM.IR
