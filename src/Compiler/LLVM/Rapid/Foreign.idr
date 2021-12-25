@@ -118,12 +118,13 @@ missingForeign cs name argTypes = do
   appendCode "\n}\n"
 
 export
-builtinForeign : (n : Nat ** (Vect n (IRValue IRObjPtr) -> Codegen ())) -> Name -> (argTypes : List CFType) -> CFType -> Codegen ()
+builtinForeign : (n : Nat ** (Vect n (IRValue IRObjPtr) -> Codegen (IRValue IRObjPtr))) -> Name -> (argTypes : List CFType) -> CFType -> Codegen ()
 builtinForeign builtin name argTypes ret = do
   let (n ** f) = builtin
   appendCode ("define external fastcc %Return1 @" ++ safeName name ++ "(" ++ (showSep ", " $ prepareArgCallConv $ toList $ map toIR (args n)) ++ ") gc \"statepoint-example\" {")
   funcEntry
-  f (args n)
+  result <- f (args n)
+  store result $ SSA (Pointer 0 IRObjPtr) ("%rvalVar")
   funcReturn
   appendCode "\n}\n"
   where
