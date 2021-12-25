@@ -907,6 +907,10 @@ getInstIR {conNames} (MKCON r (Right n) args) = do
          store obj (reg2val r)
        Nothing => addError $ "MKCON name not found: " ++ show n
 
+getInstIR (MKCLOSURE r n missingN []) = do
+  let staticClosureObj = SSA IRObjPtr $ "bitcast ({i64, %FuncPtr} addrspace(1)* @\{safeName n}$$closureNoArgs to %ObjPtr)"
+  store staticClosureObj (reg2val r)
+
 getInstIR (MKCLOSURE r n missingN args) = do
   let missing = cast {to=Int} missingN
   let len = cast {to=Int} $ length args
@@ -1094,6 +1098,15 @@ getFunIR conNames n args body = do
     traverse_ getInstIRWithComment body
     funcReturn
     appendCode "}\n"
+
+    let closureEntryName = if cast (length args) <= FAT_CLOSURE_LIMIT
+                              then safeName n
+                              else (safeName n) ++ "$$closureEntry"
+    let closureEntryType = if cast (length args) <= FAT_CLOSURE_LIMIT
+                              then "%FuncPtrArgs" ++ show (length args)
+                              else "%FuncPtrClosureEntry"
+    let closureHeader = constHeader OBJECT_TYPE_ID_CLOSURE (0x10000 * (cast $ length args))
+    appendCode $ "@" ++ safeName n ++ "$$closureNoArgs = private unnamed_addr addrspace(1) constant {i64, %FuncPtr} {" ++ toIR closureHeader ++ ", %FuncPtr bitcast (\{closureEntryType} @\{closureEntryName} to %FuncPtr)}"
   where
     copyArg : Reg -> String
     copyArg (Loc i) = let r = show i in "  %v" ++ r ++ "Var = alloca %ObjPtr\n  store %ObjPtr %v" ++ r ++ ", %ObjPtr* %v" ++ r ++ "Var"
@@ -1148,7 +1161,7 @@ getVMIR _ _ (i, (n, MkVMError is)) = ""
 funcPtrTypes : String
 funcPtrTypes = fastConcat $ map funcPtr (rangeFromTo 0 FAT_CLOSURE_LIMIT) where
   funcPtr : Int -> String
-  funcPtr i = "%FuncPtrArgs" ++ (show (i + 1)) ++ " = type %Return1 (%RuntimePtr, %TSOPtr, %RuntimePtr" ++ repeatStr ", %ObjPtr" (integerToNat $ cast (i+1)) ++ ")*\n"
+  funcPtr i = "%FuncPtrArgs" ++ (show i) ++ " = type %Return1 (%RuntimePtr, %TSOPtr, %RuntimePtr" ++ repeatStr ", %ObjPtr" (integerToNat $ cast i) ++ ")*\n"
 
 applyClosureHelperFunc : Codegen ()
 applyClosureHelperFunc = do
