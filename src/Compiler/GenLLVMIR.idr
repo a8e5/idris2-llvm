@@ -11,6 +11,7 @@ import Compiler.CompileExpr
 import Compiler.VMCode
 import Compiler.LLVM.IR
 import Compiler.LLVM.Instruction
+import Compiler.LLVM.Rapid.Closure
 import Compiler.LLVM.Rapid.Integer
 import Compiler.LLVM.Rapid.Builtin
 import Compiler.LLVM.Rapid.Foreign
@@ -27,13 +28,6 @@ import Rapid.Common
 
 -- we provide our own in Data.Utils
 %hide Core.Name.Namespace.showSep
-
-CLOSURE_MAX_ARGS : Int
-CLOSURE_MAX_ARGS = 1024
-
--- A "fat" closure is always invoked via its "closure entry" function
-FAT_CLOSURE_LIMIT : Int
-FAT_CLOSURE_LIMIT = 8
 
 ToIR Reg where
   toIR (Loc i) = "%v" ++ show i
@@ -907,32 +901,9 @@ getInstIR {conNames} (MKCON r (Right n) args) = do
          store obj (reg2val r)
        Nothing => addError $ "MKCON name not found: " ++ show n
 
-getInstIR (MKCLOSURE r n missingN []) = do
-  let staticClosureObj = SSA IRObjPtr $ "bitcast ({i64, %FuncPtr} addrspace(1)* @\{safeName n}$$closureNoArgs to %ObjPtr)"
-  store staticClosureObj (reg2val r)
-
 getInstIR (MKCLOSURE r n missingN args) = do
-  let missing = cast {to=Int} missingN
-  let len = cast {to=Int} $ length args
-  let totalArgsExpected = missing + len
-  if totalArgsExpected > (cast CLOSURE_MAX_ARGS) then addError $ "ERROR : too many closure arguments: " ++ show totalArgsExpected ++ " > " ++ show CLOSURE_MAX_ARGS else do
-  let header = constHeader OBJECT_TYPE_ID_CLOSURE (cast ((missing * 0x10000) + len))
-  newObj <- dynamicAllocate (Const I64 $ cast (8 + 8 * len))
-  putObjectHeader newObj header
-  funcPtr <- (if (totalArgsExpected <= (cast FAT_CLOSURE_LIMIT))
-             then
-               assignSSA $ "bitcast %FuncPtrArgs" ++ show totalArgsExpected ++ " @" ++ (safeName n) ++ " to %FuncPtr"
-             else do
-               assignSSA $ "bitcast %FuncPtrClosureEntry @" ++ (safeName n) ++ "$$closureEntry to %FuncPtr"
-               )
-
-  putObjectSlot newObj (Const I64 0) (SSA FuncPtr funcPtr)
-  for_ (enumerate args) (\iv => do
-      let (i, arg) = iv
-      argObj <- load {t=IRObjPtr} (reg2val arg)
-      putObjectSlot newObj (Const I64 $ cast $ i+1) argObj
-      pure ()
-                              )
+  argsV <- traverse prepareArg args
+  newObj <- mkClosure n missingN argsV
   store newObj (reg2val r)
 
 getInstIR (APPLY r fun arg) = do
