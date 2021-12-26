@@ -32,30 +32,31 @@ getOpts = (.opts) <$> get
 
 export
 appendCode : String -> Codegen ()
-appendCode c = modify $ record { code $= (c::)}
+appendCode c = modify { code $= (c::)}
 
 export
 getUnique : Codegen Int
 getUnique = do
-  (MkCGBuf o i c l e) <- get
-  put (MkCGBuf o (i+1) c l e)
+  st <- get
+  let i = st.i
+  put ({i := i+1} st)
   pure i
 
 export
 addConstant : String -> Codegen String
 addConstant v = do
   ci <- getUnique
-  (MkCGBuf o i c l e) <- get
-  let name = "@glob_" ++ show (o.constNamespace) ++ "_c" ++ show ci
-  put (MkCGBuf o i ((name, v)::c) l e)
+  st <- get
+  let name = "@glob_" ++ show (st.opts.constNamespace) ++ "_c" ++ show ci
+  put ({ consts $= ((name, v)::)} st)
   pure name
 
 export
 addError : String -> Codegen ()
 addError msg = do
   appendCode ("; ERROR: " ++ msg)
-  (MkCGBuf o i c l e) <- get
-  put $ trace ("add error: " ++ msg) (MkCGBuf o i c l (msg::e))
+  st <- get
+  put $ trace ("add error: " ++ msg) ({errors $= (msg::)} st)
 
 export
 addMetadata : String -> Codegen String
@@ -64,8 +65,7 @@ addMetadata v = do
   u <- getUnique
   let mdId = u * 0x10000 + i
   let name = "!" ++ show mdId
-  (MkCGBuf o i c l e) <- get
-  put (MkCGBuf o i ((name, v)::c) l e)
+  modify { consts $= ((name, v)::)}
   pure name
 
 export
