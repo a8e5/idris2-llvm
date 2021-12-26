@@ -4,6 +4,8 @@ import public Control.Monad.State
 import Data.List
 import Data.String
 
+import Libraries.Data.SortedMap
+
 import Debug.Trace
 import Rapid.Common
 
@@ -18,13 +20,14 @@ record CGBuffer where
   consts : List ConstDef
   code : List String
   errors : List String
+  constantValues : SortedMap Int String
 
 public export
 Codegen : Type -> Type
 Codegen = State CGBuffer
 
 emptyCG : CompileOpts -> CGBuffer
-emptyCG opts = MkCGBuf opts 0 [] [] []
+emptyCG opts = MkCGBuf opts 0 [] [] [] empty
 
 export
 getOpts : Codegen CompileOpts
@@ -78,6 +81,25 @@ appendMetadata value = do
   pure varname
 
 export
+trackValueConst : Int -> String -> Codegen ()
+trackValueConst v c = do
+  modify {constantValues $= insert v c}
+
+export
+removeValueConst : Int -> Codegen ()
+removeValueConst v = do
+  modify {constantValues $= delete v}
+
+export
+isValueConst : Int -> Codegen (Maybe String)
+isValueConst v = do
+  lookup v . (.constantValues) <$> get
+
+export
+forgetAllValuesConst : Codegen ()
+forgetAllValuesConst = modify {constantValues := empty}
+
+export
 mkVarName : String -> Codegen String
 mkVarName pfx = do
   i <- getUnique
@@ -85,5 +107,5 @@ mkVarName pfx = do
 
 export
 runCodegen : CompileOpts -> Codegen () -> String
-runCodegen o r = let (MkCGBuf _ _ cs ls errors) = fst $ runState (emptyCG o) r in
+runCodegen o r = let (MkCGBuf _ _ cs ls errors _) = fst $ runState (emptyCG o) r in
                      fastConcat $ intersperse "\n" $ (map (\(n,v) => n ++ " = " ++ v) $ reverse cs) ++ reverse ls

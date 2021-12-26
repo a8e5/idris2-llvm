@@ -143,6 +143,17 @@ prepareArg RVal = do
   addError "cannot use rval as call arg"
   pure nullPtr
 
+prepareArgWithConstInfo : Reg -> Codegen (Maybe String, IRValue IRObjPtr)
+prepareArgWithConstInfo Discard = do
+  pure (Just "(ERROR)", nullPtr)
+prepareArgWithConstInfo r@(Loc i) = do
+  isConst <- isValueConst i
+  val <- load (reg2val r)
+  pure (isConst, val)
+prepareArgWithConstInfo RVal = do
+  addError "cannot use rval as call arg"
+  pure (Just "(ERROR)", nullPtr)
+
 data ConstCaseType = IntLikeCase Constant | BigIntCase | StringCase | CharCase
 
 total
@@ -891,8 +902,18 @@ getInstIR (OP r (GTE ty) [r1, r2]) = intCompare' (intKind ty) "uge" "sge" r r1 r
 getInstIR (OP r (GT  ty) [r1, r2]) = intCompare' (intKind ty) "ugt" "sgt" r r1 r2
 
 getInstIR (MKCON r (Left tag) args) = do
-  obj <- mkCon tag !(traverse prepareArg args)
+  argsC <- traverse prepareArgWithConstInfo args
+  -- check if all arguments are constants
+  let allConst = traverse fst argsC
+  obj <- case allConst of
+              Just constArgs => do constCon <- mkConstCon tag constArgs
+                                   case r of
+                                        Loc i => do trackValueConst i (toIR constCon)
+                                                    pure constCon
+                                        _ => pure constCon
+              Nothing => mkCon tag (map snd argsC)
   store obj (reg2val r)
+
 getInstIR {conNames} (MKCON r (Right n) args) = do
   case lookup n conNames of
        Just nameId => do
@@ -905,6 +926,10 @@ getInstIR (MKCLOSURE r n missingN args) = do
   argsV <- traverse prepareArg args
   newObj <- mkClosure n missingN argsV
   store newObj (reg2val r)
+
+  case r of
+       Loc i => when (length args == 0) (trackValueConst i (toIR newObj))
+       _ => pure ()
 
 getInstIR (APPLY r fun arg) = do
   hp <- ((++) "%RuntimePtr ") <$> assignSSA "load %RuntimePtr, %RuntimePtr* %HpVar"
@@ -972,12 +997,13 @@ getInstIR (MKCONSTANT r WorldVal) = do
   store obj (reg2val r)
 getInstIR (MKCONSTANT r (Str s)) = store !(mkStr s) (reg2val r)
 
-getInstIR (CONSTCASE r alts def) = case findConstCaseType alts of
+getInstIR (CONSTCASE r alts def) = do case findConstCaseType alts of
                                           Right (IntLikeCase ty) => getInstForConstCaseIntLike ty r alts def
                                           Right BigIntCase => getInstForConstCaseInteger r alts def
                                           Right StringCase => getInstForConstCaseString r alts def
                                           Right CharCase => getInstForConstCaseChar r alts def
                                           Left err => addError ("constcase error: " ++ err)
+                                      forgetAllValuesConst
 
 getInstIR {conNames} (CASE r alts def) =
   do let def' = fromMaybe [(ERROR $ "no default in CASE")] def
@@ -995,7 +1021,7 @@ getInstIR {conNames} (CASE r alts def) =
      appendCode $ "br label %" ++ labelEnd
      traverse_ (makeCaseAlt caseId) alts
      appendCode $ labelEnd ++ ":"
-     pure ()
+     forgetAllValuesConst
   where
     makeCaseAlt : String -> (Either Int Name, List VMInst) -> Codegen ()
     makeCaseAlt caseId (Left c, is) = do

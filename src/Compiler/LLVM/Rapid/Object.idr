@@ -217,6 +217,14 @@ mkCon tag args = do
   pure newObj
 
 export
+mkConstCon : Int -> List (String) -> Codegen (IRValue IRObjPtr)
+mkConstCon tag args = do
+  let newHeader = constHeader (OBJECT_TYPE_ID_CON_NO_ARGS + (256 * (cast $ length args))) (cast tag)
+  let typeSignature = "{i64" ++ repeatStr ", %ObjPtr" (length args) ++ "}"
+  cName <- addConstant $ "private unnamed_addr addrspace(1) constant " ++ typeSignature ++ " {" ++ toIR newHeader ++ (concat $ map ((++) ", ") args) ++ "}, align 8"
+  pure $ SSA IRObjPtr $ "bitcast (" ++ typeSignature ++ " addrspace(1)* " ++ cName ++ " to %ObjPtr)"
+
+export
 cgMkDouble : IRValue F64 -> Codegen (IRValue IRObjPtr)
 cgMkDouble val = do
   newObj <- dynamicAllocate (ConstI64 8)
