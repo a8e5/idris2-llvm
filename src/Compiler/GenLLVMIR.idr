@@ -1077,7 +1077,7 @@ getFunIR conNames n args body = do
                               then "%FuncPtrArgs" ++ show (length args)
                               else "%FuncPtrClosureEntry"
     let closureHeader = constHeader OBJECT_TYPE_ID_CLOSURE (0x10000 * (cast $ length args))
-    appendCode $ "@" ++ safeName n ++ "$$closureNoArgs = private unnamed_addr addrspace(1) constant {i64, %FuncPtr} {" ++ toIR closureHeader ++ ", %FuncPtr bitcast (\{closureEntryType} @\{closureEntryName} to %FuncPtr)}"
+    appendCode $ "@" ++ safeName n ++ "$$closureNoArgs = private unnamed_addr addrspace(1) constant {i64, %FuncPtr} {" ++ toIR closureHeader ++ ", %FuncPtr bitcast (\{closureEntryType} @\{closureEntryName} to %FuncPtr)}, align 8\n"
   where
     copyArg : Reg -> String
     copyArg (Loc i) = let r = show i in "  %v" ++ r ++ "Var = alloca %ObjPtr\n  store %ObjPtr %v" ++ r ++ ", %ObjPtr* %v" ++ r ++ "Var"
