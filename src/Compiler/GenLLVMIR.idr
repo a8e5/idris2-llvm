@@ -11,6 +11,7 @@ import Compiler.CompileExpr
 import Compiler.VMCode
 import Compiler.LLVM.IR
 import Compiler.LLVM.Instruction
+import Compiler.LLVM.Rapid.Closure
 import Compiler.LLVM.Rapid.Integer
 import Compiler.LLVM.Rapid.Builtin
 import Compiler.LLVM.Rapid.Foreign
@@ -27,13 +28,6 @@ import Rapid.Common
 
 -- we provide our own in Data.Utils
 %hide Core.Name.Namespace.showSep
-
-CLOSURE_MAX_ARGS : Int
-CLOSURE_MAX_ARGS = 1024
-
--- A "fat" closure is always invoked via its "closure entry" function
-FAT_CLOSURE_LIMIT : Int
-FAT_CLOSURE_LIMIT = 8
 
 ToIR Reg where
   toIR (Loc i) = "%v" ++ show i
@@ -148,6 +142,17 @@ prepareArg r@(Loc _) = load (reg2val r)
 prepareArg RVal = do
   addError "cannot use rval as call arg"
   pure nullPtr
+
+prepareArgWithConstInfo : Reg -> Codegen (Maybe String, IRValue IRObjPtr)
+prepareArgWithConstInfo Discard = do
+  pure (Just "(ERROR)", nullPtr)
+prepareArgWithConstInfo r@(Loc i) = do
+  isConst <- isValueConst i
+  val <- load (reg2val r)
+  pure (isConst, val)
+prepareArgWithConstInfo RVal = do
+  addError "cannot use rval as call arg"
+  pure (Just "(ERROR)", nullPtr)
 
 data ConstCaseType = IntLikeCase Constant | BigIntCase | StringCase | CharCase
 
@@ -897,8 +902,18 @@ getInstIR (OP r (GTE ty) [r1, r2]) = intCompare' (intKind ty) "uge" "sge" r r1 r
 getInstIR (OP r (GT  ty) [r1, r2]) = intCompare' (intKind ty) "ugt" "sgt" r r1 r2
 
 getInstIR (MKCON r (Left tag) args) = do
-  obj <- mkCon tag !(traverse prepareArg args)
+  argsC <- traverse prepareArgWithConstInfo args
+  -- check if all arguments are constants
+  let allConst = traverse fst argsC
+  obj <- case allConst of
+              Just constArgs => do constCon <- mkConstCon tag constArgs
+                                   case r of
+                                        Loc i => do trackValueConst i (toIR constCon)
+                                                    pure constCon
+                                        _ => pure constCon
+              Nothing => mkCon tag (map snd argsC)
   store obj (reg2val r)
+
 getInstIR {conNames} (MKCON r (Right n) args) = do
   case lookup n conNames of
        Just nameId => do
@@ -908,28 +923,13 @@ getInstIR {conNames} (MKCON r (Right n) args) = do
        Nothing => addError $ "MKCON name not found: " ++ show n
 
 getInstIR (MKCLOSURE r n missingN args) = do
-  let missing = cast {to=Int} missingN
-  let len = cast {to=Int} $ length args
-  let totalArgsExpected = missing + len
-  if totalArgsExpected > (cast CLOSURE_MAX_ARGS) then addError $ "ERROR : too many closure arguments: " ++ show totalArgsExpected ++ " > " ++ show CLOSURE_MAX_ARGS else do
-  let header = constHeader OBJECT_TYPE_ID_CLOSURE (cast ((missing * 0x10000) + len))
-  newObj <- dynamicAllocate (Const I64 $ cast (8 + 8 * len))
-  putObjectHeader newObj header
-  funcPtr <- (if (totalArgsExpected <= (cast FAT_CLOSURE_LIMIT))
-             then
-               assignSSA $ "bitcast %FuncPtrArgs" ++ show totalArgsExpected ++ " @" ++ (safeName n) ++ " to %FuncPtr"
-             else do
-               assignSSA $ "bitcast %FuncPtrClosureEntry @" ++ (safeName n) ++ "$$closureEntry to %FuncPtr"
-               )
-
-  putObjectSlot newObj (Const I64 0) (SSA FuncPtr funcPtr)
-  for_ (enumerate args) (\iv => do
-      let (i, arg) = iv
-      argObj <- load {t=IRObjPtr} (reg2val arg)
-      putObjectSlot newObj (Const I64 $ cast $ i+1) argObj
-      pure ()
-                              )
+  argsV <- traverse prepareArg args
+  newObj <- mkClosure n missingN argsV
   store newObj (reg2val r)
+
+  case r of
+       Loc i => when (length args == 0) (trackValueConst i (toIR newObj))
+       _ => pure ()
 
 getInstIR (APPLY r fun arg) = do
   hp <- ((++) "%RuntimePtr ") <$> assignSSA "load %RuntimePtr, %RuntimePtr* %HpVar"
@@ -997,12 +997,13 @@ getInstIR (MKCONSTANT r WorldVal) = do
   store obj (reg2val r)
 getInstIR (MKCONSTANT r (Str s)) = store !(mkStr s) (reg2val r)
 
-getInstIR (CONSTCASE r alts def) = case findConstCaseType alts of
+getInstIR (CONSTCASE r alts def) = do case findConstCaseType alts of
                                           Right (IntLikeCase ty) => getInstForConstCaseIntLike ty r alts def
                                           Right BigIntCase => getInstForConstCaseInteger r alts def
                                           Right StringCase => getInstForConstCaseString r alts def
                                           Right CharCase => getInstForConstCaseChar r alts def
                                           Left err => addError ("constcase error: " ++ err)
+                                      forgetAllValuesConst
 
 getInstIR {conNames} (CASE r alts def) =
   do let def' = fromMaybe [(ERROR $ "no default in CASE")] def
@@ -1020,7 +1021,7 @@ getInstIR {conNames} (CASE r alts def) =
      appendCode $ "br label %" ++ labelEnd
      traverse_ (makeCaseAlt caseId) alts
      appendCode $ labelEnd ++ ":"
-     pure ()
+     forgetAllValuesConst
   where
     makeCaseAlt : String -> (Either Int Name, List VMInst) -> Codegen ()
     makeCaseAlt caseId (Left c, is) = do
@@ -1094,6 +1095,15 @@ getFunIR conNames n args body = do
     traverse_ getInstIRWithComment body
     funcReturn
     appendCode "}\n"
+
+    let closureEntryName = if cast (length args) <= FAT_CLOSURE_LIMIT
+                              then safeName n
+                              else (safeName n) ++ "$$closureEntry"
+    let closureEntryType = if cast (length args) <= FAT_CLOSURE_LIMIT
+                              then "%FuncPtrArgs" ++ show (length args)
+                              else "%FuncPtrClosureEntry"
+    let closureHeader = constHeader OBJECT_TYPE_ID_CLOSURE (0x10000 * (cast $ length args))
+    appendCode $ "@" ++ safeName n ++ "$$closureNoArgs = private unnamed_addr addrspace(1) constant {i64, %FuncPtr} {" ++ toIR closureHeader ++ ", %FuncPtr bitcast (\{closureEntryType} @\{closureEntryName} to %FuncPtr)}, align 8\n"
   where
     copyArg : Reg -> String
     copyArg (Loc i) = let r = show i in "  %v" ++ r ++ "Var = alloca %ObjPtr\n  store %ObjPtr %v" ++ r ++ ", %ObjPtr* %v" ++ r ++ "Var"
@@ -1148,7 +1158,7 @@ getVMIR _ _ (i, (n, MkVMError is)) = ""
 funcPtrTypes : String
 funcPtrTypes = fastConcat $ map funcPtr (rangeFromTo 0 FAT_CLOSURE_LIMIT) where
   funcPtr : Int -> String
-  funcPtr i = "%FuncPtrArgs" ++ (show (i + 1)) ++ " = type %Return1 (%RuntimePtr, %TSOPtr, %RuntimePtr" ++ repeatStr ", %ObjPtr" (integerToNat $ cast (i+1)) ++ ")*\n"
+  funcPtr i = "%FuncPtrArgs" ++ (show i) ++ " = type %Return1 (%RuntimePtr, %TSOPtr, %RuntimePtr" ++ repeatStr ", %ObjPtr" (integerToNat $ cast i) ++ ")*\n"
 
 applyClosureHelperFunc : Codegen ()
 applyClosureHelperFunc = do

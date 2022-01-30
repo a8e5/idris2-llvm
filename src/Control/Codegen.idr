@@ -4,6 +4,8 @@ import public Control.Monad.State
 import Data.List
 import Data.String
 
+import Libraries.Data.SortedMap
+
 import Debug.Trace
 import Rapid.Common
 
@@ -18,13 +20,14 @@ record CGBuffer where
   consts : List ConstDef
   code : List String
   errors : List String
+  constantValues : SortedMap Int String
 
 public export
 Codegen : Type -> Type
 Codegen = State CGBuffer
 
 emptyCG : CompileOpts -> CGBuffer
-emptyCG opts = MkCGBuf opts 0 [] [] []
+emptyCG opts = MkCGBuf opts 0 [] [] [] empty
 
 export
 getOpts : Codegen CompileOpts
@@ -32,30 +35,31 @@ getOpts = (.opts) <$> get
 
 export
 appendCode : String -> Codegen ()
-appendCode c = modify $ record { code $= (c::)}
+appendCode c = modify { code $= (c::)}
 
 export
 getUnique : Codegen Int
 getUnique = do
-  (MkCGBuf o i c l e) <- get
-  put (MkCGBuf o (i+1) c l e)
+  st <- get
+  let i = st.i
+  put ({i := i+1} st)
   pure i
 
 export
 addConstant : String -> Codegen String
 addConstant v = do
   ci <- getUnique
-  (MkCGBuf o i c l e) <- get
-  let name = "@glob_" ++ show (o.constNamespace) ++ "_c" ++ show ci
-  put (MkCGBuf o i ((name, v)::c) l e)
+  st <- get
+  let name = "@glob_" ++ show (st.opts.constNamespace) ++ "_c" ++ show ci
+  put ({ consts $= ((name, v)::)} st)
   pure name
 
 export
 addError : String -> Codegen ()
 addError msg = do
   appendCode ("; ERROR: " ++ msg)
-  (MkCGBuf o i c l e) <- get
-  put $ trace ("add error: " ++ msg) (MkCGBuf o i c l (msg::e))
+  st <- get
+  put $ trace ("add error: " ++ msg) ({errors $= (msg::)} st)
 
 export
 addMetadata : String -> Codegen String
@@ -64,8 +68,7 @@ addMetadata v = do
   u <- getUnique
   let mdId = u * 0x10000 + i
   let name = "!" ++ show mdId
-  (MkCGBuf o i c l e) <- get
-  put (MkCGBuf o i ((name, v)::c) l e)
+  modify { consts $= ((name, v)::)}
   pure name
 
 export
@@ -78,6 +81,25 @@ appendMetadata value = do
   pure varname
 
 export
+trackValueConst : Int -> String -> Codegen ()
+trackValueConst v c = do
+  modify {constantValues $= insert v c}
+
+export
+removeValueConst : Int -> Codegen ()
+removeValueConst v = do
+  modify {constantValues $= delete v}
+
+export
+isValueConst : Int -> Codegen (Maybe String)
+isValueConst v = do
+  lookup v . (.constantValues) <$> get
+
+export
+forgetAllValuesConst : Codegen ()
+forgetAllValuesConst = modify {constantValues := empty}
+
+export
 mkVarName : String -> Codegen String
 mkVarName pfx = do
   i <- getUnique
@@ -85,5 +107,5 @@ mkVarName pfx = do
 
 export
 runCodegen : CompileOpts -> Codegen () -> String
-runCodegen o r = let (MkCGBuf _ _ cs ls errors) = fst $ runState (emptyCG o) r in
+runCodegen o r = let (MkCGBuf _ _ cs ls errors _) = fst $ runState (emptyCG o) r in
                      fastConcat $ intersperse "\n" $ (map (\(n,v) => n ++ " = " ++ v) $ reverse cs) ++ reverse ls
